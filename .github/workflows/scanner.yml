@@ -42,7 +42,7 @@ jobs:
       # No need for manual git commands here
       
       - name: Upload Reports as Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: scanner-reports
