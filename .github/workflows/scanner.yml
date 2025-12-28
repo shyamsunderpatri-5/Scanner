@@ -1,0 +1,53 @@
+name: NSE Scanner Daily
+
+on:
+  schedule:
+    - cron: '30 10 * * *'  # 4:00 PM IST (10:30 AM UTC)
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    
+    # IMPORTANT: Give workflow write permissions
+    permissions:
+      contents: write  # Allow pushing commits
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # Fetch all history for proper commits
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas numpy ta scipy requests
+      
+      - name: Run Scanner
+        env:
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+        run: |
+          python scanner_github.py
+      
+      # The commit is now handled inside the Python script
+      # No need for manual git commands here
+      
+      - name: Upload Reports as Artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: scanner-reports
+          path: |
+            latest_reports/
+            signals/
+            logs/
+          retention-days: 30
