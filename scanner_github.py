@@ -4521,91 +4521,6 @@ if __name__ == "__main__":
 # EMAIL NOTIFICATION FUNCTION
 # ============================================================================
 
-def send_email_notification(results, csv_file, html_file, scan_time):
-    """Send email with scan results"""
-    
-    if not EMAIL_CONFIG['enabled']:
-        logger.info("Email notifications disabled")
-        return
-    
-    if not EMAIL_CONFIG['sender_email'] or not EMAIL_CONFIG['sender_password']:
-        logger.warning("Email credentials not configured - skipping email")
-        return
-    
-    try:
-        # Create message
-        msg = MIMEMultipart('alternative')
-        msg['From'] = EMAIL_CONFIG['sender_email']
-        msg['To'] = EMAIL_CONFIG['recipient_email']
-        msg['Subject'] = f"📊 NSE Scanner - {datetime.now().strftime('%Y-%m-%d')} - {len(results)} Signals"
-        
-        # Email body
-        body = f"""
-NSE SWING SCANNER v8.5 - DAILY REPORT
-{'='*70}
-
-Scan Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}
-Scan Time: {scan_time:.1f} seconds
-Total Signals: {len(results)}
-
-{'='*70}
-TOP 5 SIGNALS:
-{'='*70}
-"""
-        
-        for i, res in enumerate(results[:5], 1):
-            body += f"""
-{i}. {res['ticker']} - {res['side']}
-   💰 Price: ₹{res['price']:.2f}
-   🎯 Confidence: {res['confidence']:.1f}%
-   📈 Entry: ₹{res['entry_price']:.2f}
-   🛑 Stop Loss: ₹{res['stop_loss']:.2f}
-   🎯 Target 1: ₹{res['target_1']:.2f}
-   📊 R:R Ratio: {res['risk_reward']:.1f}x
-   📦 Quantity: {res['qty']} shares
-"""
-        
-        body += f"""
-{'='*70}
-
-📎 Full reports attached (CSV & HTML)
-
-🔗 View all results: https://github.com/{os.environ.get('GITHUB_REPOSITORY', 'your-repo')}
-
-This is an automated message from NSE Scanner v8.5
-Running on GitHub Actions ⚡
-"""
-        
-        msg.attach(MIMEText(body, 'plain'))
-        
-        # Attach CSV file
-        if csv_file and os.path.exists(csv_file):
-            with open(csv_file, 'rb') as f:
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(f.read())
-                encoders.encode_base64(part)
-                part.add_header('Content-Disposition', f'attachment; filename={os.path.basename(csv_file)}')
-                msg.attach(part)
-        
-        # Attach HTML file
-        if html_file and os.path.exists(html_file):
-            with open(html_file, 'rb') as f:
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(f.read())
-                encoders.encode_base64(part)
-                part.add_header('Content-Disposition', f'attachment; filename={os.path.basename(html_file)}')
-                msg.attach(part)
-        
-        # Send email
-        with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
-            server.starttls()
-            server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
-            server.send_message(msg)
-        
-        logger.info("✅ Email notification sent successfully")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to send email: {e}")
 
 # ============================================================================
 # MODIFIED MAIN FUNCTION FOR GITHUB ACTIONS
@@ -4964,6 +4879,100 @@ def copy_files_to_output(source_dir):
         
     except Exception as e:
         logger.error(f"⚠️  Failed to copy files: {e}")
+
+def github_actions_main():
+    """Main function optimized for GitHub Actions execution - FIXED WITH EMAIL"""
+    
+    logger.info("="*80)
+    logger.info("NSE SCANNER v8.5 - GITHUB ACTIONS EXECUTION")
+    logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
+    logger.info(f"GitHub Repository: {os.environ.get('GITHUB_REPOSITORY', 'N/A')}")
+    logger.info(f"Workflow Run: #{os.environ.get('GITHUB_RUN_NUMBER', 'N/A')}")
+    logger.info("="*80)
+    
+    import time
+    start_time = time.time()
+    
+    try:
+        logger.info("Starting stock scan...")
+        
+        # Run main scanner
+        results = main()
+        
+        scan_time = time.time() - start_time
+        
+        # Check if results exist AND have data
+        if results and len(results) > 0:
+            logger.info(f"Scan complete: {len(results)} signals found in {scan_time:.1f}s")
+            
+            # Use correct directory name
+            signals_dir = f"signals_v8.5_{ACCURACY_MODE.lower()}"
+            logger.info(f"Looking for files in: {signals_dir}/")
+            
+            # Find the latest files
+            csv_file = None
+            html_file = None
+            
+            if os.path.exists(signals_dir):
+                csv_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.csv')])
+                html_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.html')])
+                
+                if csv_files:
+                    csv_file = os.path.join(signals_dir, csv_files[-1])
+                    logger.info(f"Found CSV: {csv_file}")
+                
+                if html_files:
+                    html_file = os.path.join(signals_dir, html_files[-1])
+                    logger.info(f"Found HTML: {html_file}")
+                
+                # Copy files to standard location for artifacts
+                copy_files_to_output(signals_dir)
+            else:
+                logger.warning(f"Directory not found: {signals_dir}")
+            
+            # ===================================================================
+            # FIX: ADD EMAIL NOTIFICATION HERE
+            # ===================================================================
+            logger.info("="*80)
+            logger.info("SENDING EMAIL NOTIFICATION")
+            logger.info("="*80)
+            
+            send_email_notification(results, csv_file, html_file, scan_time)
+            
+            logger.info("Email notification completed")
+            # ===================================================================
+            
+        else:
+            logger.info(f"No signals found in {scan_time:.1f}s")
+            
+            # Send no-signals email
+            send_no_signals_email(scan_time)
+        
+        logger.info("="*80)
+        logger.info("GitHub Actions execution completed successfully")
+        logger.info("="*80)
+        
+        return 0
+        
+    except Exception as e:
+        logger.error(f"FATAL ERROR: {e}", exc_info=True)
+        
+        # Send error notification
+        if EMAIL_CONFIG['enabled'] and EMAIL_CONFIG['sender_email']:
+            try:
+                msg = MIMEText(f"Scanner error:\n\n{str(e)}\n\nCheck logs.")
+                msg['Subject'] = "NSE Scanner Error"
+                msg['From'] = EMAIL_CONFIG['sender_email']
+                msg['To'] = EMAIL_CONFIG['recipient_email']
+                
+                with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+                    server.starttls()
+                    server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+                    server.send_message(msg)
+            except:
+                pass
+        
+        return 1
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
