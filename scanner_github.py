@@ -208,7 +208,7 @@ PRESETS = {
         'min_volume_ratio': 0.8,
         'rsi_range_long': (45, 60),
         'rsi_range_short': (40, 55),
-        'conditions_required': 5,
+        'conditions_required': 4,
         'use_sector_rotation': True,
         'use_vix_sentiment': True,
         'use_fibonacci': True,
@@ -236,7 +236,7 @@ PRESETS = {
         'min_volume_ratio': 0.5,            # ✅ Already correct
         'rsi_range_long': (40, 62),         # ✅ Already correct
         'rsi_range_short': (38, 60),        # ✅ Already correct
-        'conditions_required': 4,           # ✅ Already correct
+        'conditions_required': 2,           # ✅ Already correct
         'use_sector_rotation': True,        # ✅ Already correct
         'use_vix_sentiment': True,          # ✅ Already correct
         'use_fibonacci': True,              # ✅ Already correct
@@ -355,7 +355,7 @@ USE_DELIVERY_VOLUME = True           # Delivery volume estimation
 USE_EARNINGS_FILTER = True           # Earnings date filter
 USE_TRAILING_STOP = True             # Trailing stop calculations
 USE_CONSOLIDATION_BREAKOUT = True    # Consolidation breakout detection
-USE_MARKET_BREADTH = False            # Market breadth analysis
+USE_MARKET_BREADTH = True            # Market breadth analysis
 EARNINGS_AVOID_DAYS = 7              # Avoid stocks with earnings within X days
 
 # Backtesting
@@ -3495,7 +3495,8 @@ def generate_entry_signal(ind: Dict, df: pd.DataFrame, side: str) -> Dict:
                 volume_ratio >= PRESET['min_volume_ratio']
             ]
             
-            if sum(conditions) >= 3:
+            min_conditions = PRESET.get('conditions_required', 3)
+            if sum(conditions) >= min_conditions:
                 entry_ready = True
                 entry_signal = "LONG_ENTRY"
         
@@ -3523,7 +3524,8 @@ def generate_entry_signal(ind: Dict, df: pd.DataFrame, side: str) -> Dict:
                 volume_ratio >= PRESET['min_volume_ratio']
             ]
             
-            if sum(conditions) >= 3:
+            min_conditions = PRESET.get('conditions_required', 3)
+            if sum(conditions) >= min_conditions:
                 entry_ready = True
                 entry_signal = "SHORT_ENTRY"
         
@@ -5526,6 +5528,19 @@ def main():
     if market_breadth and USE_MARKET_BREADTH:
         print("  └─ Analyzing market breadth...")
         market_breadth_data = market_breadth.analyze()
+        print("  └─ Analyzing market breadth...")
+        market_breadth_data = market_breadth.analyze()
+        
+        # DEBUG OUTPUT
+        print(f"\n  📊 MARKET BREADTH DEBUG:")
+        print(f"     Valid: {market_breadth_data.get('valid')}")
+        print(f"     Regime: {market_breadth_data.get('regime')}")
+        print(f"     Long OK: {market_breadth_data.get('long_ok')}")
+        print(f"     Short OK: {market_breadth_data.get('short_ok')}")
+        print(f"     Message: {market_breadth_data.get('message')}")
+        print(f"     ROC 5d: {market_breadth_data.get('roc_5')}%")
+        print(f"     ROC 20d: {market_breadth_data.get('roc_20')}%")
+
         if market_breadth_data.get('valid'):
             print(f"      └─ {market_breadth_data.get('message', 'Unknown')}")
     
