@@ -352,10 +352,10 @@ USE_REALTIME_DATA = True  # Use live data during market hours
 USE_52_WEEK_FILTER = True           # 52-Week High/Low analysis
 USE_RELATIVE_STRENGTH = True         # Relative Strength vs Nifty
 USE_DELIVERY_VOLUME = True           # Delivery volume estimation
-USE_EARNINGS_FILTER = True           # Earnings date filter
+USE_EARNINGS_FILTER = False           # Earnings date filter
 USE_TRAILING_STOP = True             # Trailing stop calculations
 USE_CONSOLIDATION_BREAKOUT = True    # Consolidation breakout detection
-USE_MARKET_BREADTH = True            # Market breadth analysis
+USE_MARKET_BREADTH = False            # Market breadth analysis
 EARNINGS_AVOID_DAYS = 7              # Avoid stocks with earnings within X days
 
 # Backtesting
