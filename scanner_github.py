@@ -14,7 +14,18 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+import shutil 
 
+# Fix Windows encoding BEFORE any other imports
+if sys.platform == 'win32':
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    os.environ['PYTHONUTF8'] = '1'
+    
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except:
+        pass
 # ============================================================================
 # GITHUB ACTIONS CONFIGURATION
 # ============================================================================
@@ -29,24 +40,61 @@ EMAIL_CONFIG = {
     'recipient_email': os.environ.get('EMAIL_RECIPIENT', ''),
 }
 
-# GitHub Actions paths
-SIGNALS_DIR = 'signals'
-LOG_FILE = 'logs/scanner.log'
+
+
+ 
+
+# ============================================================================
+# STEP 2: SAFE LOGGING SETUP
+# ============================================================================
+
+class SafeStreamHandler(logging.StreamHandler):
+    """Handler that safely encodes Unicode for Windows console"""
+    
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            # Replace Unicode characters with ASCII equivalents
+            replacements = {
+                '✅': '[OK]', '❌': '[FAIL]', '⚠️': '[WARN]', '⚠': '[WARN]',
+                '📊': '[DATA]', '📈': '[UP]', '📉': '[DOWN]', '🚀': '[GO]',
+                '💰': '[MONEY]', '🎯': '[TARGET]', '📧': '[EMAIL]', '📋': '[COPY]',
+                '📂': '[DIR]', '📄': '[FILE]', '🔍': '[SEARCH]', '💡': '[TIP]',
+                '🟢': '[GREEN]', '🟡': '[YELLOW]', '🔵': '[BLUE]', '🔴': '[RED]',
+                '🟠': '[ORANGE]', '⚪': '[WHITE]', '🔥': '[HOT]', '⏳': '[WAIT]',
+                '█': '#', '░': '-', '═': '=', '─': '-', '━': '-',
+                '╔': '+', '╗': '+', '╚': '+', '╝': '+', '║': '|',
+                '╠': '+', '╣': '+', '╦': '+', '╩': '+', '╬': '+',
+                '✓': '[v]', '✗': '[x]', '•': '*', '→': '->', '←': '<-',
+                '↑': '^', '↓': 'v', '★': '*', '☆': '*',
+                '█': '#', '▓': '#', '▒': '=', '░': '-',
+                '┌': '+', '┐': '+', '└': '+', '┘': '+', '├': '+',
+                '┤': '+', '┬': '+', '┴': '+', '┼': '+', '│': '|', '─': '-',
+            }
+            
+            for unicode_char, ascii_char in replacements.items():
+                msg = msg.replace(unicode_char, ascii_char)
+            
+            # Handle any remaining non-ASCII characters
+            msg = msg.encode('ascii', errors='replace').decode('ascii')
+            
+            stream = self.stream
+            stream.write(msg + self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)
 
 # Create directories
-os.makedirs(SIGNALS_DIR, exist_ok=True)
 os.makedirs('logs', exist_ok=True)
+os.makedirs('signals', exist_ok=True)
 
-# ============================================================================
-# LOGGING SETUP
-# ============================================================================
-
+# Configure logging with safe handler
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler()
+        logging.FileHandler('logs/scanner.log', encoding='utf-8'),
+        SafeStreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
@@ -54,6 +102,42 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # IMPORT YOUR ORIGINAL SCANNER CODE
 # ============================================================================
+
+# ============================================================================
+# STEP 3: SAFE PRINT FUNCTION
+# ============================================================================
+_original_print = print
+
+def safe_print(*args, **kwargs):
+    """Print function that handles Unicode safely on Windows"""
+    try:
+        # Convert all arguments to strings and replace Unicode
+        safe_args = []
+        for arg in args:
+            s = str(arg)
+            replacements = {
+                '✅': '[OK]', '❌': '[FAIL]', '⚠️': '[WARN]', '⚠': '[WARN]',
+                '📊': '[DATA]', '📈': '[UP]', '📉': '[DOWN]', '🚀': '[GO]',
+                '💰': '$', '🎯': '[TARGET]', '📧': '[EMAIL]', '📋': '[COPY]',
+                '📂': '[DIR]', '📄': '[FILE]', '🔍': '[SEARCH]', '💡': '[TIP]',
+                '🟢': '[GREEN]', '🟡': '[YELLOW]', '🔵': '[BLUE]', '🔴': '[RED]',
+                '🟠': '[ORANGE]', '⚪': '[WHITE]', '🔥': '[HOT]', '⏳': '[WAIT]',
+                '█': '#', '░': '-', '═': '=', '━': '-',
+                '✓': '[v]', '•': '*', '→': '->', '★': '*',
+            }
+            for unicode_char, ascii_char in replacements.items():
+                s = s.replace(unicode_char, ascii_char)
+            safe_args.append(s)
+        
+        _original_print(*safe_args, **kwargs)
+    except UnicodeEncodeError:
+        # Fallback: encode to ASCII with replacement
+        safe_args = [str(arg).encode('ascii', errors='replace').decode('ascii') for arg in args]
+        _original_print(*safe_args, **kwargs)
+
+# Replace built-in print
+print = safe_print
+
 """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 NSE SWING SCANNER v8.5 - ULTIMATE ACCURACY EDITION
@@ -74,7 +158,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, time as dt_time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
-import logging
 import time
 
 # Platform-specific encoding fix
@@ -104,6 +187,16 @@ warnings.filterwarnings('ignore')
 
 ACCURACY_MODE = 'BALANCED'  # 'CONSERVATIVE', 'BALANCED', or 'AGGRESSIVE'
 BACKTEST_MODE = 'HYBRID'      # 'MINI', 'FULL', 'HYBRID', 'NONE'
+
+# GitHub Actions paths
+SIGNALS_DIR = f"signals_v8.5_{ACCURACY_MODE.lower()}"
+LOG_FILE = 'logs/scanner.log'
+ERROR_LOG_FILE = f"scanner_v8.5_{ACCURACY_MODE.lower()}.log"
+
+# Create directories
+os.makedirs(SIGNALS_DIR, exist_ok=True)
+os.makedirs('logs', exist_ok=True)
+os.makedirs('signals', exist_ok=True)  
 
 # Configuration Presets
 PRESETS = {
@@ -218,6 +311,13 @@ SCORING_WEIGHTS = {
     "backtest_win_rate": 13,        # ✅ Raised from 12
     "backtest_profit_factor": 9,    # ✅ Raised from 8
     "pattern_reliability": 11,      # ✅ Raised from 10
+
+    "fifty_two_week": 10,           # 52-Week High/Low analysis
+    "relative_strength": 9,          # RS vs Nifty
+    "delivery_volume": 6,            # Delivery % estimation
+    "earnings_filter": 8,            # Earnings date penalty
+    "consolidation_breakout": 11,    # Consolidation breakout bonus
+    "market_breadth": 7,             # Market breadth filter
 }
 
 # Scanner Parameters
@@ -249,6 +349,15 @@ USE_WALK_FORWARD = True         # ✅ ENABLED (3 periods validation)
 USE_MONTE_CARLO = False         # ✅ DISABLED (saves time in BALANCED mode)
 USE_REALTIME_DATA = True  # Use live data during market hours
 
+USE_52_WEEK_FILTER = True           # 52-Week High/Low analysis
+USE_RELATIVE_STRENGTH = True         # Relative Strength vs Nifty
+USE_DELIVERY_VOLUME = True           # Delivery volume estimation
+USE_EARNINGS_FILTER = True           # Earnings date filter
+USE_TRAILING_STOP = True             # Trailing stop calculations
+USE_CONSOLIDATION_BREAKOUT = True    # Consolidation breakout detection
+USE_MARKET_BREADTH = True            # Market breadth analysis
+EARNINGS_AVOID_DAYS = 7              # Avoid stocks with earnings within X days
+
 # Backtesting
 BACKTEST_LOOKBACK_DAYS = 300    # ✅ Changed from 252 to 300
 MIN_BACKTEST_TRADES = 12        # ✅ Raised from 10 to 12
@@ -258,19 +367,7 @@ WALK_FORWARD_PERIODS = 3        # ✅ Keep at 3 (good balance)
 SIGNALS_DIR = f"signals_v8.5_{ACCURACY_MODE.lower()}"
 ERROR_LOG_FILE = f"scanner_v8.5_{ACCURACY_MODE.lower()}.log"
 
-# ============================================================================
-# LOGGING & STATS
-# ============================================================================
 
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(levelname)s: %(message)s",
-    handlers=[
-        logging.FileHandler(ERROR_LOG_FILE),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 
 # Complete stats dictionary
 stats = {
@@ -281,6 +378,9 @@ stats = {
     "walk_forward_fail": 0, "monte_carlo_fail": 0,
     "vcp_fail": 0, "vsa_fail": 0, "supertrend_fail": 0, "portfolio_fail": 0,
     "liquidity_fail": 0, "circuit_fail": 0, "hours_fail": 0, "price_range_fail": 0,
+    "earnings_fail": 0,
+    "market_breadth_fail": 0,
+    "52w_fail": 0,
 }
 
 rejection_samples = []
@@ -358,46 +458,6 @@ class MonteCarloResult:
 
 class TradeRule:
     """Enhanced trade rule with multi-entry support - AGGRESSIVE QTY FIX"""
-    def calculate_dynamic_targets(self, confidence: float):
-        """Adjust targets based on setup quality - FIXED VERSION"""
-        
-        # ✅ FIXED: Variable R:R based on confidence
-        if confidence >= 85:
-            # Very high confidence - aggressive targets
-            multiplier_t1 = 2.5
-            multiplier_t2 = 5.0
-        elif confidence >= 75:
-            # High confidence - good targets
-            multiplier_t1 = 2.2
-            multiplier_t2 = 4.5
-        elif confidence >= 65:
-            # Good confidence - standard targets
-            multiplier_t1 = 2.0
-            multiplier_t2 = 4.0
-        elif confidence >= 55:
-            # Medium confidence - conservative targets
-            multiplier_t1 = 1.8
-            multiplier_t2 = 3.5
-        else:
-            # Low confidence - very conservative
-            multiplier_t1 = 1.5
-            multiplier_t2 = 3.0
-        
-        if self.side == "LONG":
-            self.target_1 = round(self.entry_price + (self.atr * multiplier_t1), 2)
-            self.target_2 = round(self.entry_price + (self.atr * multiplier_t2), 2)
-        else:
-            self.target_1 = round(self.entry_price - (self.atr * multiplier_t1), 2)
-            self.target_2 = round(self.entry_price - (self.atr * multiplier_t2), 2)
-        
-        # Recalculate R:R
-        risk_per_share = abs(self.entry_price - self.stop_loss)
-        reward_per_share = abs(self.target_1 - self.entry_price)
-        
-        if risk_per_share > 0:
-            self.risk_reward_ratio = reward_per_share / risk_per_share
-        else:
-            self.risk_reward_ratio = 0
 
 
     def __init__(self, ticker: str, side: str, current_price: float, atr: float):
@@ -447,6 +507,18 @@ class TradeRule:
         reward = abs(self.target_1 - self.entry_price)
         self.risk_reward_ratio = reward / risk if risk > 0 else 0
     
+    def get_trailing_stops(self, current_price: float, highest_since_entry: float, lowest_since_entry: float) -> Dict:
+        """Calculate trailing stops for this trade"""
+        return TrailingStopManager.get_all_trailing_stops(
+            entry_price=self.entry_price,
+            current_price=current_price,
+            highest_price=highest_since_entry,
+            lowest_price=lowest_since_entry,
+            atr=self.atr,
+            side=self.side
+        )
+     
+
     def calculate_dynamic_targets(self, confidence: float):
         """Adjust targets based on setup quality - ENHANCED VERSION"""
         
@@ -1367,6 +1439,884 @@ class CandlestickPatternDetector:
             
         except Exception as e:
             return {'pattern': 'NONE', 'score': 0, 'description': 'None'}
+
+# ============================================================================
+# 1. FIFTY-TWO WEEK HIGH/LOW ANALYZER
+# ============================================================================
+
+class FiftyTwoWeekAnalyzer:
+    """
+    52-Week High/Low Analysis - CRITICAL for breakouts
+    
+    Why Important:
+    - Breakouts above 52W high have 65% success rate
+    - Stocks near 52W low often continue falling
+    - Best swing trades: 10-20% below 52W high
+    """
+    
+    @staticmethod
+    def analyze(df: pd.DataFrame, current_price: float) -> Dict:
+        """Analyze position relative to 52-week range"""
+        try:
+            # Need at least 200 days of data
+            if len(df) < 200:
+                return {
+                    'valid': False,
+                    'score': 0,
+                    'signal': 'Insufficient data for 52W analysis'
+                }
+            
+            # Get 52-week data (approximately 252 trading days)
+            year_data = df.tail(252)
+            
+            high_52w = float(year_data['High'].max())
+            low_52w = float(year_data['Low'].min())
+            range_52w = high_52w - low_52w
+            
+            if range_52w <= 0:
+                return {'valid': False, 'score': 0, 'signal': 'Invalid price range'}
+            
+            # Position in range (0% = at low, 100% = at high)
+            position_pct = ((current_price - low_52w) / range_52w) * 100
+            
+            # Distance from 52W high
+            dist_from_high = ((high_52w - current_price) / high_52w) * 100
+            
+            # Distance from 52W low
+            dist_from_low = ((current_price - low_52w) / low_52w) * 100 if low_52w > 0 else 0
+            
+            # Is it making new high?
+            is_new_high = current_price >= high_52w * 0.98  # Within 2%
+            
+            # Is it near 52W low? (Avoid these!)
+            is_near_low = current_price <= low_52w * 1.10  # Within 10%
+            
+            # Score calculation
+            score = 0
+            signal = ""
+            
+            if is_new_high:
+                score = 12
+                signal = "🚀 52-Week Breakout!"
+            elif position_pct >= 85:
+                score = 8
+                signal = "Near 52W high - Strong momentum"
+            elif position_pct >= 70:
+                score = 5
+                signal = "Upper range - Healthy trend"
+            elif position_pct >= 50:
+                score = 2
+                signal = "Middle of range - Neutral"
+            elif position_pct >= 30:
+                score = -3
+                signal = "Lower range - Weakness"
+            elif position_pct >= 15:
+                score = -7
+                signal = "Near 52W low - Caution"
+            else:
+                score = -12
+                signal = "⚠️ At 52W low - AVOID"
+            
+            return {
+                'valid': True,
+                'high_52w': round(high_52w, 2),
+                'low_52w': round(low_52w, 2),
+                'position_pct': round(position_pct, 1),
+                'dist_from_high': round(dist_from_high, 1),
+                'dist_from_low': round(dist_from_low, 1),
+                'is_new_high': is_new_high,
+                'is_near_low': is_near_low,
+                'score': score,
+                'signal': signal
+            }
+            
+        except Exception as e:
+            return {
+                'valid': False,
+                'score': 0,
+                'signal': f'52W analysis error: {str(e)[:30]}'
+            }
+
+
+# ============================================================================
+# 2. RELATIVE STRENGTH VS NIFTY ANALYZER
+# ============================================================================
+
+class RelativeStrengthAnalyzer:
+    """
+    Compare stock performance vs Nifty 50
+    
+    Why Important:
+    - Stocks outperforming Nifty tend to continue outperforming
+    - RS > 1 means stock is stronger than market
+    - Best swing trades: RS > 1.2 (20% stronger)
+    """
+    
+    def __init__(self):
+        self.nifty_data = None
+        self._load_nifty_data()
+    
+    def _load_nifty_data(self):
+        """Load Nifty 50 data"""
+        try:
+            self.nifty_data = yf.download(
+                "^NSEI",
+                period="6mo",
+                interval="1d",
+                progress=False
+            )
+            
+            # Handle MultiIndex columns
+            if isinstance(self.nifty_data.columns, pd.MultiIndex):
+                self.nifty_data.columns = self.nifty_data.columns.get_level_values(0)
+            
+            if self.nifty_data.empty:
+                logger.warning("Failed to load Nifty data for RS analysis")
+                self.nifty_data = None
+                
+        except Exception as e:
+            logger.warning(f"Nifty data load error: {e}")
+            self.nifty_data = None
+    
+    def calculate_rs(self, stock_df: pd.DataFrame, periods: List[int] = [5, 20, 60]) -> Dict:
+        """Calculate Relative Strength vs Nifty"""
+        try:
+            if self.nifty_data is None or len(self.nifty_data) < 60:
+                return {
+                    'valid': False,
+                    'score': 0,
+                    'signal': 'Nifty data not available'
+                }
+            
+            if len(stock_df) < 60:
+                return {
+                    'valid': False,
+                    'score': 0,
+                    'signal': 'Insufficient stock data'
+                }
+            
+            results = {'valid': True, 'periods': {}}
+            rs_ratios = []
+            
+            for period in periods:
+                if len(stock_df) < period or len(self.nifty_data) < period:
+                    continue
+                
+                # Stock return
+                stock_close_now = float(stock_df['Close'].iloc[-1])
+                stock_close_past = float(stock_df['Close'].iloc[-period])
+                
+                if stock_close_past <= 0:
+                    continue
+                    
+                stock_return = ((stock_close_now / stock_close_past) - 1) * 100
+                
+                # Nifty return
+                nifty_close_now = float(self.nifty_data['Close'].iloc[-1])
+                nifty_close_past = float(self.nifty_data['Close'].iloc[-period])
+                
+                if nifty_close_past <= 0:
+                    continue
+                    
+                nifty_return = ((nifty_close_now / nifty_close_past) - 1) * 100
+                
+                # Relative Strength Ratio
+                rs_ratio = (1 + stock_return/100) / (1 + nifty_return/100)
+                rs_ratios.append(rs_ratio)
+                
+                # Outperformance
+                outperformance = stock_return - nifty_return
+                
+                results['periods'][f'{period}d'] = {
+                    'stock_return': round(stock_return, 2),
+                    'nifty_return': round(nifty_return, 2),
+                    'rs_ratio': round(rs_ratio, 3),
+                    'outperformance': round(outperformance, 2)
+                }
+            
+            if not rs_ratios:
+                return {
+                    'valid': False,
+                    'score': 0,
+                    'signal': 'Could not calculate RS'
+                }
+            
+            # Overall RS Score
+            avg_rs = float(np.mean(rs_ratios))
+            
+            if avg_rs >= 1.3:
+                results['score'] = 10
+                results['signal'] = "🔥 Very Strong vs Nifty"
+            elif avg_rs >= 1.15:
+                results['score'] = 7
+                results['signal'] = "Strong vs Nifty"
+            elif avg_rs >= 1.05:
+                results['score'] = 4
+                results['signal'] = "Slightly stronger than Nifty"
+            elif avg_rs >= 0.95:
+                results['score'] = 0
+                results['signal'] = "In-line with Nifty"
+            elif avg_rs >= 0.85:
+                results['score'] = -5
+                results['signal'] = "Weaker than Nifty"
+            else:
+                results['score'] = -10
+                results['signal'] = "⚠️ Very Weak vs Nifty - AVOID"
+            
+            results['avg_rs'] = round(avg_rs, 3)
+            
+            return results
+            
+        except Exception as e:
+            return {
+                'valid': False,
+                'score': 0,
+                'signal': f'RS calculation error: {str(e)[:30]}'
+            }
+
+
+# ============================================================================
+# 3. DELIVERY VOLUME ANALYZER
+# ============================================================================
+
+class DeliveryVolumeAnalyzer:
+    """
+    Delivery Volume Analysis
+    
+    Why Critical for Indian Markets:
+    - High delivery % (>50%) = Real buying (institutions)
+    - Low delivery % (<30%) = Intraday speculation
+    - Swing trades need high delivery for sustainability
+    
+    Note: Uses price action heuristics when actual delivery data unavailable
+    """
+    
+    @staticmethod
+    def estimate_delivery(df: pd.DataFrame) -> Dict:
+        """
+        Estimate delivery quality from price action
+        Uses heuristics when actual delivery data not available
+        """
+        try:
+            if len(df) < 10:
+                return {
+                    'valid': False,
+                    'estimated_delivery_score': 50,
+                    'signal': 'Insufficient data',
+                    'score': 0
+                }
+            
+            recent = df.tail(5)
+            scores = []
+            
+            for _, row in recent.iterrows():
+                candle_range = row['High'] - row['Low']
+                if candle_range <= 0:
+                    continue
+                
+                # Close position in range (0 = at low, 1 = at high)
+                close_position = (row['Close'] - row['Low']) / candle_range
+                
+                # Higher delivery when close is near extremes (not middle)
+                # Close near high = bullish delivery
+                # Close near low = bearish delivery (selling pressure)
+                delivery_score = abs(close_position - 0.5) * 2  # 0-1 scale
+                scores.append(delivery_score)
+            
+            if not scores:
+                return {
+                    'valid': False,
+                    'estimated_delivery_score': 50,
+                    'signal': 'Could not calculate',
+                    'score': 0
+                }
+            
+            avg_score = float(np.mean(scores))
+            
+            # Volume consistency (lower std = more consistent = better)
+            vol_mean = recent['Volume'].mean()
+            vol_std = recent['Volume'].std()
+            vol_consistency = 1 - min(1, vol_std / vol_mean) if vol_mean > 0 else 0.5
+            
+            # Combined score (0-100 scale)
+            final_score = (avg_score * 0.6 + vol_consistency * 0.4) * 100
+            
+            # Determine signal and points
+            if final_score >= 70:
+                signal = "High delivery likely - Institutional interest"
+                points = 6
+            elif final_score >= 55:
+                signal = "Moderate delivery - Acceptable"
+                points = 3
+            elif final_score >= 40:
+                signal = "Low delivery - Speculative"
+                points = -2
+            else:
+                signal = "Very low delivery - Avoid"
+                points = -5
+            
+            return {
+                'valid': True,
+                'estimated_delivery_score': round(final_score, 1),
+                'close_consistency': round(avg_score * 100, 1),
+                'volume_consistency': round(vol_consistency * 100, 1),
+                'signal': signal,
+                'score': points
+            }
+            
+        except Exception as e:
+            return {
+                'valid': False,
+                'estimated_delivery_score': 50,
+                'signal': f'Delivery estimation error: {str(e)[:30]}',
+                'score': 0
+            }
+
+
+# ============================================================================
+# 4. EARNINGS DATE FILTER
+# ============================================================================
+
+class EarningsFilter:
+    """
+    Filter stocks with upcoming earnings
+    
+    Why Important:
+    - Earnings create unpredictable gaps
+    - Swing trades can be destroyed by earnings miss
+    - Rule: Avoid stocks reporting within 7 days
+    """
+    
+    @staticmethod
+    def check_earnings(ticker: str, days_ahead: int = 7) -> Dict:
+        """Check if earnings are upcoming"""
+        try:
+            # Clean ticker for yfinance
+            yf_ticker = ticker if '.NS' in ticker or '.BO' in ticker else f"{ticker}.NS"
+            
+            stock = yf.Ticker(yf_ticker)
+            calendar = stock.calendar
+            
+            if calendar is None:
+                return {
+                    'earnings_soon': False,
+                    'safe_to_trade': True,
+                    'message': "No earnings calendar available",
+                    'score': 0
+                }
+            
+            # Handle different calendar formats
+            earnings_date = None
+            
+            if isinstance(calendar, pd.DataFrame):
+                if 'Earnings Date' in calendar.columns:
+                    earnings_date = calendar['Earnings Date'].iloc[0] if len(calendar) > 0 else None
+                elif len(calendar.columns) > 0:
+                    # Try first column
+                    earnings_date = calendar.iloc[0, 0] if len(calendar) > 0 else None
+            elif isinstance(calendar, dict):
+                earnings_date = calendar.get('Earnings Date', [None])[0]
+            
+            if earnings_date is None:
+                return {
+                    'earnings_soon': False,
+                    'safe_to_trade': True,
+                    'message': "No upcoming earnings date found",
+                    'score': 0
+                }
+            
+            # Convert to datetime if string
+            if isinstance(earnings_date, str):
+                earnings_date = pd.to_datetime(earnings_date)
+            
+            # Calculate days until earnings
+            now = datetime.now()
+            if hasattr(earnings_date, 'to_pydatetime'):
+                earnings_date = earnings_date.to_pydatetime()
+            
+            if isinstance(earnings_date, datetime):
+                days_until = (earnings_date - now).days
+                
+                if 0 <= days_until <= days_ahead:
+                    return {
+                        'earnings_soon': True,
+                        'safe_to_trade': False,
+                        'days_until': days_until,
+                        'earnings_date': earnings_date.strftime('%Y-%m-%d'),
+                        'message': f"⚠️ Earnings in {days_until} days - AVOID!",
+                        'score': -15  # Heavy penalty
+                    }
+                elif days_until < 0 and days_until >= -3:
+                    # Just reported - might have gap risk
+                    return {
+                        'earnings_soon': False,
+                        'safe_to_trade': True,
+                        'days_since': abs(days_until),
+                        'message': f"Earnings {abs(days_until)} days ago",
+                        'score': -3
+                    }
+            
+            return {
+                'earnings_soon': False,
+                'safe_to_trade': True,
+                'message': "No imminent earnings",
+                'score': 2  # Slight bonus for clarity
+            }
+            
+        except Exception as e:
+            # If we can't check, assume safe but no bonus
+            return {
+                'earnings_soon': False,
+                'safe_to_trade': True,
+                'message': f"Could not verify: {str(e)[:30]}",
+                'score': 0
+            }
+
+
+# ============================================================================
+# 5. TRAILING STOP MANAGER
+# ============================================================================
+
+class TrailingStopManager:
+    """
+    Trailing Stop Loss Calculator for Swing Trades
+    
+    Why Important:
+    - Locks in profits as trade moves in your favor
+    - Prevents giving back gains
+    - Automates exit decision
+    
+    Methods:
+    - ATR: Trail by 2x ATR below highest point
+    - Percent: Trail by fixed % below highest point
+    - Chandelier: More aggressive 3x ATR trailing
+    """
+    
+    @staticmethod
+    def calculate_trailing_stop(
+        entry_price: float,
+        current_price: float,
+        highest_price: float,
+        lowest_price: float,
+        atr: float,
+        side: str,
+        method: str = 'atr'
+    ) -> Dict:
+        """
+        Calculate trailing stop based on current price movement
+        
+        Args:
+            entry_price: Original entry price
+            current_price: Current market price
+            highest_price: Highest price since entry (for LONG)
+            lowest_price: Lowest price since entry (for SHORT)
+            atr: Current ATR value
+            side: 'LONG' or 'SHORT'
+            method: 'atr', 'percent', or 'chandelier'
+        """
+        try:
+            # Calculate trail distance based on method
+            if method == 'atr':
+                trail_distance = atr * 2.0
+            elif method == 'percent':
+                trail_distance = current_price * 0.05  # 5% trail
+            elif method == 'chandelier':
+                trail_distance = atr * 3.0
+            else:
+                trail_distance = atr * 2.0
+            
+            if side == "LONG":
+                # Trailing stop trails below the highest high
+                trailing_stop = highest_price - trail_distance
+                
+                # Stop should never go below initial stop
+                initial_stop = entry_price - (atr * 1.5)
+                trailing_stop = max(trailing_stop, initial_stop)
+                
+                # Calculate locked profit
+                if trailing_stop > entry_price:
+                    locked_profit_pct = ((trailing_stop - entry_price) / entry_price) * 100
+                else:
+                    locked_profit_pct = 0
+                
+                # Current P&L
+                current_pnl_pct = ((current_price - entry_price) / entry_price) * 100
+                
+            else:  # SHORT
+                # Trailing stop trails above the lowest low
+                trailing_stop = lowest_price + trail_distance
+                
+                # Stop should never go above initial stop
+                initial_stop = entry_price + (atr * 1.5)
+                trailing_stop = min(trailing_stop, initial_stop)
+                
+                # Calculate locked profit
+                if trailing_stop < entry_price:
+                    locked_profit_pct = ((entry_price - trailing_stop) / entry_price) * 100
+                else:
+                    locked_profit_pct = 0
+                
+                # Current P&L
+                current_pnl_pct = ((entry_price - current_price) / entry_price) * 100
+            
+            return {
+                'trailing_stop': round(trailing_stop, 2),
+                'trail_distance': round(trail_distance, 2),
+                'method': method,
+                'locked_profit_pct': round(locked_profit_pct, 2),
+                'current_pnl_pct': round(current_pnl_pct, 2),
+                'highest_since_entry': round(highest_price, 2) if side == "LONG" else None,
+                'lowest_since_entry': round(lowest_price, 2) if side == "SHORT" else None
+            }
+            
+        except Exception as e:
+            return {
+                'trailing_stop': entry_price - (atr * 1.5) if side == "LONG" else entry_price + (atr * 1.5),
+                'trail_distance': atr * 2.0,
+                'method': method,
+                'error': str(e)[:30]
+            }
+    
+    @staticmethod
+    def get_all_trailing_stops(
+        entry_price: float,
+        current_price: float,
+        highest_price: float,
+        lowest_price: float,
+        atr: float,
+        side: str
+    ) -> Dict:
+        """Calculate trailing stops using all methods"""
+        
+        methods = ['atr', 'percent', 'chandelier']
+        results = {}
+        
+        for method in methods:
+            results[method] = TrailingStopManager.calculate_trailing_stop(
+                entry_price, current_price, highest_price, lowest_price,
+                atr, side, method
+            )
+        
+        # Recommend the most appropriate method
+        if side == "LONG":
+            # Use tightest stop if in profit
+            if current_price > entry_price * 1.05:
+                recommended = 'percent'  # Tighter trail when in profit
+            else:
+                recommended = 'atr'  # Standard trail
+        else:
+            if current_price < entry_price * 0.95:
+                recommended = 'percent'
+            else:
+                recommended = 'atr'
+        
+        results['recommended_method'] = recommended
+        results['recommended_stop'] = results[recommended]['trailing_stop']
+        
+        return results
+
+
+# ============================================================================
+# 6. CONSOLIDATION BREAKOUT DETECTOR
+# ============================================================================
+
+class ConsolidationBreakoutDetector:
+    """
+    Detect consolidation patterns and breakouts
+    
+    Why Important:
+    - Consolidation = Price compression = Energy building
+    - Breakouts from consolidation have high success rate (>60%)
+    - Best swing setups often come from 2-4 week consolidations
+    """
+    
+    @staticmethod
+    def detect(df: pd.DataFrame, min_days: int = 10, max_days: int = 40) -> Dict:
+        """Detect consolidation and potential breakout"""
+        try:
+            if len(df) < max_days + 5:
+                return {
+                    'consolidation_found': False,
+                    'score': 0,
+                    'signal': 'Insufficient data for consolidation analysis'
+                }
+            
+            best_consolidation = None
+            best_score = 0
+            
+            # Look for consolidation patterns of various lengths
+            for lookback in range(max_days, min_days - 1, -3):
+                if len(df) < lookback + 5:
+                    continue
+                
+                # Get consolidation period and current bars
+                consolidation_period = df.iloc[-(lookback + 5):-5].copy()
+                current_bars = df.tail(3).copy()
+                
+                if len(consolidation_period) < lookback * 0.8:
+                    continue
+                
+                # Calculate consolidation range
+                cons_high = float(consolidation_period['High'].max())
+                cons_low = float(consolidation_period['Low'].min())
+                
+                if cons_low <= 0:
+                    continue
+                
+                range_pct = ((cons_high - cons_low) / cons_low) * 100
+                
+                # Narrow range = Consolidation (typically less than 12-15%)
+                if range_pct <= 15:
+                    current_price = float(current_bars['Close'].iloc[-1])
+                    current_high = float(current_bars['High'].max())
+                    current_low = float(current_bars['Low'].min())
+                    
+                    # Check for breakout
+                    breakout_up = current_high > cons_high
+                    breakout_down = current_low < cons_low
+                    
+                    # Volume confirmation
+                    avg_vol = float(consolidation_period['Volume'].mean())
+                    current_vol = float(current_bars['Volume'].mean())
+                    vol_expansion = current_vol > avg_vol * 1.5 if avg_vol > 0 else False
+                    
+                    # Tightness bonus (tighter = better)
+                    tightness_score = max(0, (15 - range_pct) / 15 * 5)
+                    
+                    if breakout_up and vol_expansion:
+                        score = 12 + tightness_score
+                        if score > best_score:
+                            best_score = score
+                            best_consolidation = {
+                                'consolidation_found': True,
+                                'consolidation_days': lookback,
+                                'range_pct': round(range_pct, 1),
+                                'breakout_type': 'BULLISH',
+                                'breakout_level': round(cons_high, 2),
+                                'support_level': round(cons_low, 2),
+                                'volume_confirmed': True,
+                                'volume_ratio': round(current_vol / avg_vol, 2) if avg_vol > 0 else 1,
+                                'score': round(score),
+                                'signal': f"🚀 Bullish breakout from {lookback}-day consolidation!"
+                            }
+                    
+                    elif breakout_down and vol_expansion:
+                        score = -12 - tightness_score
+                        if abs(score) > abs(best_score):
+                            best_score = score
+                            best_consolidation = {
+                                'consolidation_found': True,
+                                'consolidation_days': lookback,
+                                'range_pct': round(range_pct, 1),
+                                'breakout_type': 'BEARISH',
+                                'breakout_level': round(cons_low, 2),
+                                'resistance_level': round(cons_high, 2),
+                                'volume_confirmed': True,
+                                'volume_ratio': round(current_vol / avg_vol, 2) if avg_vol > 0 else 1,
+                                'score': round(score),
+                                'signal': f"📉 Bearish breakdown from {lookback}-day consolidation"
+                            }
+                    
+                    elif range_pct <= 8 and not breakout_up and not breakout_down:
+                        # Tight consolidation, no breakout yet - prepare for trade
+                        score = 4
+                        if not best_consolidation or best_consolidation.get('breakout_type') == 'PENDING':
+                            if score > best_score:
+                                best_score = score
+                                best_consolidation = {
+                                    'consolidation_found': True,
+                                    'consolidation_days': lookback,
+                                    'range_pct': round(range_pct, 1),
+                                    'breakout_type': 'PENDING',
+                                    'resistance': round(cons_high, 2),
+                                    'support': round(cons_low, 2),
+                                    'score': score,
+                                    'signal': f"⏳ Tight {lookback}-day consolidation - Breakout imminent"
+                                }
+            
+            if best_consolidation:
+                return best_consolidation
+            
+            return {
+                'consolidation_found': False,
+                'score': 0,
+                'signal': 'No consolidation pattern detected'
+            }
+            
+        except Exception as e:
+            return {
+                'consolidation_found': False,
+                'score': 0,
+                'error': str(e)[:40],
+                'signal': f'Consolidation detection error'
+            }
+
+
+# ============================================================================
+# 7. MARKET BREADTH ANALYZER
+# ============================================================================
+
+class MarketBreadthAnalyzer:
+    """
+    Market Breadth Analysis using Nifty 50
+    
+    Why Important:
+    - Don't go LONG when market breadth is negative
+    - Protects from buying in stealth corrections
+    - Aligns trades with overall market direction
+    """
+    
+    def __init__(self):
+        self.market_data = None
+        self.last_update = None
+        self._load_market_data()
+    
+    def _load_market_data(self):
+        """Load market index data"""
+        try:
+            # Try Nifty 50 first
+            self.market_data = yf.download(
+                "^NSEI",
+                period="3mo",
+                interval="1d",
+                progress=False
+            )
+            
+            # Handle MultiIndex
+            if isinstance(self.market_data.columns, pd.MultiIndex):
+                self.market_data.columns = self.market_data.columns.get_level_values(0)
+            
+            if self.market_data.empty:
+                # Fallback to Nifty Bank
+                self.market_data = yf.download(
+                    "^NSEBANK",
+                    period="3mo",
+                    interval="1d",
+                    progress=False
+                )
+                
+                if isinstance(self.market_data.columns, pd.MultiIndex):
+                    self.market_data.columns = self.market_data.columns.get_level_values(0)
+            
+            self.last_update = datetime.now()
+            
+        except Exception as e:
+            logger.warning(f"Market breadth data load error: {e}")
+            self.market_data = None
+    
+    def analyze(self) -> Dict:
+        """Analyze current market breadth"""
+        try:
+            # Refresh data if stale
+            if self.last_update is None or (datetime.now() - self.last_update).total_seconds() > 3600:
+                self._load_market_data()
+            
+            if self.market_data is None or len(self.market_data) < 50:
+                return {
+                    'valid': False,
+                    'long_ok': True,  # Default to allowing
+                    'short_ok': True,
+                    'regime': 'UNKNOWN',
+                    'score': 0,
+                    'message': 'Market data not available'
+                }
+            
+            # Calculate indicators
+            current_close = float(self.market_data['Close'].iloc[-1])
+            sma_20 = float(self.market_data['Close'].rolling(20).mean().iloc[-1])
+            sma_50 = float(self.market_data['Close'].rolling(50).mean().iloc[-1])
+            
+            # Rate of change
+            roc_5 = ((current_close / float(self.market_data['Close'].iloc[-5])) - 1) * 100
+            roc_20 = ((current_close / float(self.market_data['Close'].iloc[-20])) - 1) * 100
+            
+            # Volatility (using ATR proxy)
+            high = self.market_data['High'].tail(14)
+            low = self.market_data['Low'].tail(14)
+            close = self.market_data['Close'].tail(14)
+            tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
+            atr_pct = (tr.mean() / current_close) * 100
+            
+            # Determine market regime
+            if current_close > sma_20 > sma_50 and roc_5 > 0 and roc_20 > 0:
+                regime = "BULLISH"
+                long_ok = True
+                short_ok = False
+                score = 8
+                message = "🟢 Market BULLISH - Favor LONG trades"
+            
+            elif current_close > sma_20 > sma_50 and roc_5 < 0:
+                regime = "BULLISH_PULLBACK"
+                long_ok = True
+                short_ok = False
+                score = 4
+                message = "🟡 Bullish pullback - LONG on dips"
+            
+            elif current_close < sma_20 < sma_50 and roc_5 < 0 and roc_20 < 0:
+                regime = "BEARISH"
+                long_ok = False
+                short_ok = True
+                score = -8
+                message = "🔴 Market BEARISH - Favor SHORT or stay cash"
+            
+            elif current_close < sma_20 < sma_50 and roc_5 > 0:
+                regime = "BEARISH_BOUNCE"
+                long_ok = False
+                short_ok = True
+                score = -4
+                message = "🟠 Bearish bounce - SHORT on rallies"
+            
+            elif current_close > sma_20 and current_close < sma_50:
+                regime = "RECOVERY"
+                long_ok = True
+                short_ok = True
+                score = 2
+                message = "🔵 Recovery mode - Selective LONG"
+            
+            elif current_close < sma_20 and current_close > sma_50:
+                regime = "WEAKENING"
+                long_ok = True
+                short_ok = True
+                score = -2
+                message = "🟠 Weakening trend - Caution advised"
+            
+            else:
+                regime = "NEUTRAL"
+                long_ok = True
+                short_ok = True
+                score = 0
+                message = "⚪ Market NEUTRAL - Trade selectively"
+            
+            # High volatility adjustment
+            if atr_pct > 2.0:
+                score = int(score * 0.7)  # Reduce conviction in high volatility
+                message += " (High volatility)"
+            
+            return {
+                'valid': True,
+                'regime': regime,
+                'long_ok': long_ok,
+                'short_ok': short_ok,
+                'score': score,
+                'roc_5': round(roc_5, 2),
+                'roc_20': round(roc_20, 2),
+                'sma_20': round(sma_20, 2),
+                'sma_50': round(sma_50, 2),
+                'current': round(current_close, 2),
+                'atr_pct': round(atr_pct, 2),
+                'message': message
+            }
+            
+        except Exception as e:
+            return {
+                'valid': False,
+                'long_ok': True,
+                'short_ok': True,
+                'regime': 'ERROR',
+                'score': 0,
+                'message': f'Market breadth error: {str(e)[:30]}'
+            }
+
 # ============================================================================
 # MULTI-TIMEFRAME ANALYZER
 # ============================================================================
@@ -1379,7 +2329,12 @@ class MultiTimeframeAnalyzer:
         """Get multi-timeframe trend alignment"""
         try:
             daily = yf.download(ticker, period="3mo", interval="1d", progress=False)
+            if isinstance(daily.columns, pd.MultiIndex):
+                daily.columns = daily.columns.get_level_values(0)
+
             weekly = yf.download(ticker, period="6mo", interval="1wk", progress=False)
+            if isinstance(weekly.columns, pd.MultiIndex):
+                weekly.columns = weekly.columns.get_level_values(0)
             
             if daily.empty or weekly.empty:
                 return None
@@ -1473,6 +2428,8 @@ class VIXSentimentAnalyzer:
         """Get current VIX sentiment"""
         try:
             vix = yf.download("^INDIAVIX", period="1mo", interval="1d", progress=False)
+            if isinstance(vix.columns, pd.MultiIndex):
+                vix.columns = vix.columns.get_level_values(0)
             
             if vix.empty:
                 return None
@@ -1532,6 +2489,8 @@ class SectorRotationAnalyzer:
             for sector, ticker in self.sector_etfs.items():
                 try:
                     data = yf.download(ticker, period="3mo", interval="1d", progress=False)
+                    if isinstance(data.columns, pd.MultiIndex):
+                        data.columns = data.columns.get_level_values(0)
                     if not data.empty:
                         returns = (data['Close'].iloc[-1] / data['Close'].iloc[-20] - 1) * 100
                         self.sector_strength[sector] = returns
@@ -2601,7 +3560,13 @@ def score_signal(
     momentum_analysis: Dict,
     vcp_analysis: Dict,
     gap_analysis: Dict,
-    supertrend_info: Dict
+    supertrend_info: Dict,
+    fifty_two_week_data: Optional[Dict] = None,
+    rs_data: Optional[Dict] = None,
+    delivery_data: Optional[Dict] = None,
+    earnings_data: Optional[Dict] = None,
+    consolidation_data: Optional[Dict] = None,
+    market_breadth_data: Optional[Dict] = None
 ) -> Tuple[float, List[str]]:
     """Comprehensive scoring with REALISTIC confidence - STEEPER SIGMOID"""
     
@@ -2833,7 +3798,111 @@ def score_signal(
             reasons.append("Strong sector")
         elif rs_label == "WEAK":
             raw_score -= 4  # ✅ PENALTY
+     # ═══════════════════════════════════════════════════════════════════════
+    # NEW FEATURE SCORING - ADD ALL OF THIS BELOW SECTOR STRENGTH
+    # ═══════════════════════════════════════════════════════════════════════
     
+    # ═══════════════════════════════════════════════════════════════════════
+    # 52-WEEK HIGH/LOW (max ±12 points)
+    # ═══════════════════════════════════════════════════════════════════════
+    if fifty_two_week_data and fifty_two_week_data.get('valid'):
+        ftw_score = fifty_two_week_data.get('score', 0)
+    
+        # Apply score based on trade direction
+        if side == "LONG":
+            raw_score += ftw_score
+            if ftw_score >= 8:
+                reasons.append(fifty_two_week_data.get('signal', '52W Strong'))
+            elif ftw_score <= -7:
+                reasons.append("⚠️ Near 52W low")
+        else:  # SHORT
+            # Inverse logic for shorts
+            raw_score -= ftw_score * 0.5  # Shorts benefit from weakness
+            if ftw_score <= -7:
+                reasons.append("Weakness - good for short")
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # RELATIVE STRENGTH VS NIFTY (max ±10 points)
+    # ═══════════════════════════════════════════════════════════════════════
+    if rs_data and rs_data.get('valid'):
+        rs_score = rs_data.get('score', 0)
+        
+        if side == "LONG":
+            raw_score += rs_score
+            if rs_score >= 6:
+                reasons.append(f"RS {rs_data.get('avg_rs', 1):.2f}x Nifty")
+        else:  # SHORT - weak RS is good
+            raw_score -= rs_score * 0.7
+            if rs_score <= -5:
+                reasons.append("Weak vs Nifty - good for short")
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # DELIVERY VOLUME (max ±6 points)
+    # ═══════════════════════════════════════════════════════════════════════
+    if delivery_data and delivery_data.get('valid'):
+        delivery_score = delivery_data.get('score', 0)
+        raw_score += delivery_score
+        
+        if delivery_score >= 4:
+            reasons.append("High delivery %")
+        elif delivery_score <= -3:
+            reasons.append("Low delivery - speculative")
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # EARNINGS FILTER (max ±15 points - HEAVY PENALTY)
+    # ═══════════════════════════════════════════════════════════════════════
+    if earnings_data:
+        earnings_score = earnings_data.get('score', 0)
+        raw_score += earnings_score
+        
+        if earnings_score <= -10:
+            reasons.append(earnings_data.get('message', 'Earnings risk'))
+        elif earnings_score > 0:
+            reasons.append("No earnings risk")
+    
+    # ====================================================================
+    # EARNINGS FILTER - REJECT IF EARNINGS SOON
+    # ====================================================================
+    if earnings_data and USE_EARNINGS_FILTER:
+        if earnings_data.get('earnings_soon') and not earnings_data.get('safe_to_trade', True):
+            stats["earnings_fail"] += 1  # ✅ FIXED
+            log_rejection("Earnings soon", earnings_data.get('message', ''))
+            return None
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # CONSOLIDATION BREAKOUT (max ±15 points)
+    # ═══════════════════════════════════════════════════════════════════════
+    if consolidation_data and consolidation_data.get('consolidation_found'):
+        cons_score = consolidation_data.get('score', 0)
+        breakout_type = consolidation_data.get('breakout_type', '')
+        
+        # Apply score based on alignment with trade direction
+        if (side == "LONG" and breakout_type == "BULLISH") or \
+           (side == "SHORT" and breakout_type == "BEARISH"):
+            raw_score += abs(cons_score)
+            reasons.append(consolidation_data.get('signal', 'Consolidation breakout'))
+        elif breakout_type == "PENDING":
+            raw_score += cons_score * 0.5
+            reasons.append("Consolidation forming")
+        elif breakout_type:
+            # Wrong direction breakout
+            raw_score -= abs(cons_score) * 0.5
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # MARKET BREADTH (max ±8 points)
+    # ═══════════════════════════════════════════════════════════════════════
+    if market_breadth_data and market_breadth_data.get('valid'):
+        breadth_score = market_breadth_data.get('score', 0)
+        regime = market_breadth_data.get('regime', 'NEUTRAL')
+        
+        if side == "LONG":
+            raw_score += breadth_score
+            if breadth_score >= 5:
+                reasons.append(f"Market {regime}")
+        else:  # SHORT
+            raw_score -= breadth_score  # Inverse for shorts
+            if breadth_score <= -5:
+                reasons.append(f"Market bearish - good for short")
     # ═══════════════════════════════════════════════════════════════════════
     # ✅ CONFIGURABLE SIGMOID TRANSFORMATION
     # ═══════════════════════════════════════════════════════════════════════
@@ -3071,11 +4140,11 @@ def get_nifty500_fallback() -> List[str]:
         "OBEROIRLTY.NS", "OIL.NS", "PERSISTENT.NS", "PIIND.NS", "PVR.NS",
         "RAIN.NS", "RAMCOCEM.NS", "SBICARD.NS", "SKFINDIA.NS", "SOLARINDS.NS",
         "SONACOMS.NS", "SUNTV.NS", "SUPREMEIND.NS", "SYNGENE.NS", "TATACHEM.NS",
-        "TATACOMM.NS", "TATAELXSI.NS", "TIINDIA.NS", "TORNTPOWER.NS", "TTML.NS",
+         "TATAELXSI.NS", "TIINDIA.NS", "TORNTPOWER.NS", "TTML.NS",
         "UBL.NS", "UNIONBANK.NS", "VOLTAS.NS", "WHIRLPOOL.NS", "ZEEL.NS",
         
         # Small Cap (Momentum stocks)
-        "AAVAS.NS", "ABCAPITAL.NS", "AEGISCHEM.NS", "AFFLE.NS", "AJANTPHARM.NS",
+        "AAVAS.NS",  "AEGISCHEM.NS", "AFFLE.NS", "AJANTPHARM.NS",
         "ALKYLAMINE.NS", "AMBER.NS", "APLLTD.NS", "ASAHIINDIA.NS", "ASHOKLEY.NS",
         "ATUL.NS", "AVANTIFEED.NS", "AXISCADES.NS", "BASF.NS", "BEML.NS",
         "BHARTIHEXA.NS", "BIKAJI.NS", "BLS.NS", "BSOFT.NS", "CAMS.NS",
@@ -3104,12 +4173,12 @@ def get_nifty500_fallback() -> List[str]:
         "SCHAEFFLER.NS", "SHARDACROP.NS", "SHILPAMED.NS", "SHOPERSTOP.NS", "SHYAMMETL.NS",
         "SJVN.NS", "SOBHA.NS", "SPANDANA.NS", "SPARC.NS", "STARCEMENT.NS",
         "STAR.NS", "STLTECH.NS", "STYRENIX.NS", "SUBEX.NS", "SUNDARMFIN.NS",
-        "SUNDRMFAST.NS", "SUNPHARMA.NS", "SUPRAJIT.NS", "SUPRIYA.NS", "SUVEN.NS",
+        "SUNDRMFAST.NS",  "SUPRAJIT.NS", "SUPRIYA.NS", "SUVEN.NS",
         "SWANENERGY.NS", "SYMPHONY.NS", "TATACOMM.NS", "TATAINVEST.NS", "TATAMETALI.NS",
-        "TCNSBRANDS.NS", "TEAMLEASE.NS", "TECHM.NS", "THERMAX.NS", "THYROCARE.NS",
+        "TCNSBRANDS.NS", "TEAMLEASE.NS",  "THERMAX.NS", "THYROCARE.NS",
         "TIMKEN.NS", "TIPSINDLTD.NS", "TRITURBINE.NS", "TRIDENT.NS", "TRITURBINE.NS",
         "TTK.NS", "TV18BRDCST.NS", "UCOBANK.NS", "UJAAS.NS", "UJJIVAN.NS",
-        "ULTRACEMCO.NS", "UNICHEMLAB.NS", "UNIONBANK.NS", "UTIAMC.NS", "VAIBHAVGBL.NS",
+         "UNICHEMLAB.NS", "UTIAMC.NS", "VAIBHAVGBL.NS",
         "VARROC.NS", "VBL.NS", "VENKEYS.NS", "VGUARD.NS", "VIPIND.NS",
         "VINATIORGA.NS", "VSTIND.NS", "WABCOINDIA.NS", "WELCORP.NS", "WELSPUNIND.NS",
         "WESTLIFE.NS", "WILSON.NS", "WOCKPHARMA.NS", "YESBANK.NS", "ZENSARTECH.NS",
@@ -3293,7 +4362,13 @@ def scan_ticker(
     portfolio_mgr: PortfolioRiskManager,
     mtf_analyzer: MultiTimeframeAnalyzer,
     backtester: Optional[AdvancedBacktester] = None,
-    run_full_backtest: bool = False
+    run_full_backtest: bool = False,
+    fifty_two_week_analyzer = None,
+    rs_analyzer = None,
+    delivery_analyzer = None,
+    earnings_filter = None,
+    consolidation_detector = None,
+    market_breadth_data: Optional[Dict] = None
 ) -> Optional[Dict]:
     """Complete scanner - FULLY FIXED VERSION WITH PROPER DATA HANDLING"""
     
@@ -3421,6 +4496,39 @@ def scan_ticker(
             candle = CandlestickPatternDetector.detect(df_t)
             st_direction, st_strength, st_metrics = SupertrendIndicator.calculate(df_t)
             mtf_trend = mtf_analyzer.get_trend(ticker)
+
+            # 1. 52-Week High/Low Analysis
+            fifty_two_week_data = None
+            if fifty_two_week_analyzer and USE_52_WEEK_FILTER:
+                fifty_two_week_data = FiftyTwoWeekAnalyzer.analyze(df_t, price)
+            
+            # 2. Relative Strength vs Nifty
+            rs_data = None
+            if rs_analyzer and USE_RELATIVE_STRENGTH:
+                rs_data = rs_analyzer.calculate_rs(df_t)
+            
+            # 3. Delivery Volume Estimation
+            delivery_data = None
+            if delivery_analyzer and USE_DELIVERY_VOLUME:
+                delivery_data = DeliveryVolumeAnalyzer.estimate_delivery(df_t)
+            
+            # 4. Earnings Filter
+            earnings_data = None
+            if earnings_filter and USE_EARNINGS_FILTER:
+                earnings_data = EarningsFilter.check_earnings(ticker)
+                
+                # REJECT if earnings within EARNINGS_AVOID_DAYS
+                if earnings_data.get('earnings_soon') and not earnings_data.get('safe_to_trade', True):
+                    stats["earnings_fail"] += 1  # ✅ Correct key
+                    log_rejection("Earnings soon", earnings_data.get('message', ''))
+                    return None
+            
+            # 5. Consolidation Breakout
+            consolidation_data = None
+            if consolidation_detector and USE_CONSOLIDATION_BREAKOUT:
+                consolidation_data = ConsolidationBreakoutDetector.detect(df_t)
+            
+            
         except Exception as e:
             stats["indicator_fail"] += 1
             log_rejection("Analyzer error", str(e)[:40])
@@ -3482,7 +4590,13 @@ def scan_ticker(
             {'score': momentum_score, 'signal': momentum_signal},
             {'score': vcp_score, 'signal': vcp_signal},
             {'score': gap_score, 'signal': gap_signal},
-            {'direction': st_direction, 'strength': st_strength}
+            {'direction': st_direction, 'strength': st_strength},
+            fifty_two_week_data=fifty_two_week_data,
+            rs_data=rs_data,
+            delivery_data=delivery_data,
+            earnings_data=earnings_data,
+            consolidation_data=consolidation_data,
+            market_breadth_data=market_breadth_data
         )
         
         short_conf, short_reasons = score_signal(
@@ -3493,7 +4607,13 @@ def scan_ticker(
             {'score': momentum_score, 'signal': momentum_signal},
             {'score': vcp_score, 'signal': vcp_signal},
             {'score': gap_score, 'signal': gap_signal},
-            {'direction': st_direction, 'strength': st_strength}
+            {'direction': st_direction, 'strength': st_strength},
+            fifty_two_week_data=fifty_two_week_data,
+            rs_data=rs_data,
+            delivery_data=delivery_data,
+            earnings_data=earnings_data,
+            consolidation_data=consolidation_data,
+            market_breadth_data=market_breadth_data
         )
         
         # ====================================================================
@@ -3517,6 +4637,18 @@ def scan_ticker(
             confidence = short_conf
             reasons = short_reasons
             entry_info = short_entry
+        # ====================================================================
+        # MARKET BREADTH FILTER (NOW AFTER SIDE IS DETERMINED) - ADD HERE!
+        # ====================================================================
+        if market_breadth_data and market_breadth_data.get('valid'):
+            if side == "LONG" and not market_breadth_data.get('long_ok', True):
+                stats["market_breadth_fail"] += 1  # ✅ Correct key
+                log_rejection("Market bearish", "LONG not advised")
+                return None
+            if side == "SHORT" and not market_breadth_data.get('short_ok', True):
+                stats["market_breadth_fail"] += 1  # ✅ Correct key
+                log_rejection("Market bullish", "SHORT not advised")
+                return None
         
         # ====================================================================
         # CREATE TRADE RULE
@@ -3603,84 +4735,99 @@ def scan_ticker(
         # ====================================================================
         # PORTFOLIO RISK CHECK (IF ENABLED)
         # ====================================================================
-        # if USE_PORTFOLIO_RISK and portfolio_mgr:
-        #     can_add, reason = portfolio_mgr.can_add_trade({
-        #         'ticker': ticker,
-        #         'side': side,
-        #         'position_value': trade_rule.position_value,
-        #         'risk_amount': trade_rule.risk_amount,
-        #         'sector': sector,
-        #     })
+        if USE_PORTFOLIO_RISK and portfolio_mgr:
+            can_add, reason = portfolio_mgr.can_add_trade({
+                'ticker': ticker,
+                'side': side,
+                'position_value': trade_rule.position_value,
+                'risk_amount': trade_rule.actual_risk,  # ✅ Use actual_risk not risk_amount
+                'sector': sector,
+            })
+        
+        if not can_add:
+            stats["portfolio_fail"] += 1
+            log_rejection("Portfolio limit", reason)
+            return None  # ✅ Return None, not just add warning
             
-        #     if not can_add:
-        #         stats["portfolio_fail"] += 1
-        #         log_rejection("Portfolio limit", reason)
-        #         result['portfolio_warning'] = reason
-        #         return None
-        
-        # ====================================================================
-        # SUCCESS - BUILD RESULT OBJECT
-        # ====================================================================
-        stats["passed"] += 1
-        
-        # Print successful signal
-        print(f"\n✅ SIGNAL #{stats['passed']}: {ticker.replace('.NS', '').replace('.BO', '')}")
-        print(f"   {side} @ ₹{price:.2f} | Conf: {confidence:.1f}% | R:R: {trade_rule.risk_reward_ratio:.1f}x")
-        
-        result = {
-            "ticker": ticker.replace(".NS", "").replace(".BO", ""),
-            "side": side,
-            "price": round(price, 2),
-            "confidence": round(confidence, 1),
-            "rsi": round(ind["rsi"], 1),
-            "atr": round(ind["atr"], 2),
-            "adx": round(ind["adx"], 1),
-            "entry_price": trade_rule.entry_price,
-            "stop_loss": trade_rule.stop_loss,
-            "target_1": trade_rule.target_1,
-            "target_2": trade_rule.target_2,
-            "risk_reward": round(trade_rule.risk_reward_ratio, 2),
-            "qty": trade_rule.qty,
-            "position_value": round(trade_rule.position_value, 2),
-            "risk_amount": round(trade_rule.risk_amount, 2),
-            "entry_signal": entry_info["entry_signal"],
-            "reasons": " | ".join(reasons),
-            "sector": sector or "N/A",
-            "pe": pe,
-            "trade_rule": trade_rule,
-            "mini_backtest": mini_metrics,
-            "backtest_validated": False
-        }
-        
-        # Add backtest results if available
-        if backtest_result:
-            result["backtest"] = {
-                "win_rate": backtest_result.win_rate,
-                "profit_factor": backtest_result.profit_factor,
-                "sharpe_ratio": backtest_result.sharpe_ratio,
-                "max_drawdown": backtest_result.max_drawdown,
-                "reliability_score": backtest_result.reliability_score,
-                "total_trades": backtest_result.total_trades,
-                "expectancy": backtest_result.expectancy,
+            # ====================================================================
+            # SUCCESS - BUILD RESULT OBJECT
+            # ====================================================================
+            stats["passed"] += 1
+            
+            # Print successful signal
+            print(f"\n✅ SIGNAL #{stats['passed']}: {ticker.replace('.NS', '').replace('.BO', '')}")
+            print(f"   {side} @ ₹{price:.2f} | Conf: {confidence:.1f}% | R:R: {trade_rule.risk_reward_ratio:.1f}x")
+            
+            result = {
+                "ticker": ticker.replace(".NS", "").replace(".BO", ""),
+                "side": side,
+                "price": round(price, 2),
+                "confidence": round(confidence, 1),
+                "rsi": round(ind["rsi"], 1),
+                "atr": round(ind["atr"], 2),
+                "adx": round(ind["adx"], 1),
+                "entry_price": trade_rule.entry_price,
+                "stop_loss": trade_rule.stop_loss,
+                "target_1": trade_rule.target_1,
+                "target_2": trade_rule.target_2,
+                "risk_reward": round(trade_rule.risk_reward_ratio, 2),
+                "qty": trade_rule.qty,
+                "position_value": round(trade_rule.position_value, 2),
+                "risk_amount": round(trade_rule.risk_amount, 2),
+                "entry_signal": entry_info["entry_signal"],
+                "reasons": " | ".join(reasons),
+                "sector": sector or "N/A",
+                "pe": pe,
+                "trade_rule": trade_rule,
+                "mini_backtest": mini_metrics,
+                "fifty_two_week": fifty_two_week_data if fifty_two_week_data else {},
+                "relative_strength": rs_data if rs_data else {},
+                "delivery_estimate": delivery_data if delivery_data else {},
+                "earnings_info": earnings_data if earnings_data else {},
+                "consolidation": consolidation_data if consolidation_data else {},
+                "market_regime": market_breadth_data.get('regime', 'N/A') if market_breadth_data else 'N/A',
+                
+                # Trailing stops (calculate initial values)
+                "trailing_stops": TrailingStopManager.get_all_trailing_stops(
+                    entry_price=trade_rule.entry_price,
+                    current_price=price,
+                    highest_price=float(df_t['High'].tail(5).max()),
+                    lowest_price=float(df_t['Low'].tail(5).min()),
+                    atr=ind["atr"],
+                    side=side
+                ) if USE_TRAILING_STOP else {},
+                "backtest_validated": False
             }
-            result["backtest_validated"] = True
-        
-        # Add walk-forward results if available
-        if walk_forward_result:
-            result["walk_forward"] = {
-                "avg_win_rate": walk_forward_result.avg_win_rate,
-                "consistency": walk_forward_result.consistency_score,
-                "passed": walk_forward_result.passed
-            }
-        
-        # Add Monte Carlo results if available
-        if monte_carlo_result:
-            result["monte_carlo"] = {
-                "prob_profit": monte_carlo_result.prob_profit,
-                "risk_of_ruin": monte_carlo_result.risk_of_ruin,
-            }
-        
-        return result
+            
+            # Add backtest results if available
+            if backtest_result:
+                result["backtest"] = {
+                    "win_rate": backtest_result.win_rate,
+                    "profit_factor": backtest_result.profit_factor,
+                    "sharpe_ratio": backtest_result.sharpe_ratio,
+                    "max_drawdown": backtest_result.max_drawdown,
+                    "reliability_score": backtest_result.reliability_score,
+                    "total_trades": backtest_result.total_trades,
+                    "expectancy": backtest_result.expectancy,
+                }
+                result["backtest_validated"] = True
+            
+            # Add walk-forward results if available
+            if walk_forward_result:
+                result["walk_forward"] = {
+                    "avg_win_rate": walk_forward_result.avg_win_rate,
+                    "consistency": walk_forward_result.consistency_score,
+                    "passed": walk_forward_result.passed
+                }
+            
+            # Add Monte Carlo results if available
+            if monte_carlo_result:
+                result["monte_carlo"] = {
+                    "prob_profit": monte_carlo_result.prob_profit,
+                    "risk_of_ruin": monte_carlo_result.risk_of_ruin,
+                }
+            
+            return result
         
     except Exception as e:
         # Catch-all exception handler
@@ -3701,7 +4848,13 @@ def hybrid_scan_universe(
     vix_filter: VIXSentimentAnalyzer,
     fibo_detector: FibonacciDetector,
     portfolio_mgr: PortfolioRiskManager,
-    mtf_analyzer: MultiTimeframeAnalyzer
+    mtf_analyzer: MultiTimeframeAnalyzer,
+    fifty_two_week_analyzer=None,
+    rs_analyzer=None,
+    delivery_analyzer=None,
+    earnings_filter=None,
+    consolidation_detector=None,
+    market_breadth_data: Optional[Dict] = None
 ) -> List[Dict]:
     """Hybrid scanning: Quick scan + Full backtest top candidates"""
     
@@ -3723,7 +4876,14 @@ def hybrid_scan_universe(
             portfolio_mgr=portfolio_mgr,
             mtf_analyzer=mtf_analyzer,
             backtester=None,
-            run_full_backtest=False
+            run_full_backtest=False,
+            fifty_two_week_analyzer=fifty_two_week_analyzer,
+            rs_analyzer=rs_analyzer,
+            delivery_analyzer=delivery_analyzer,
+            earnings_filter=earnings_filter,
+            consolidation_detector=consolidation_detector,
+            market_breadth_data=market_breadth_data
+
         )
         
         if result:
@@ -3867,6 +5027,9 @@ def print_statistics():
         ("Walk-Forward", stats.get("walk_forward_fail", 0)),
         ("Monte Carlo", stats.get("monte_carlo_fail", 0)),
         ("Portfolio Risk", stats.get("portfolio_fail", 0)),
+        ("Earnings Risk", stats.get("earnings_fail", 0)),
+        ("Market Breadth", stats.get("market_breadth_fail", 0)),
+        ("52-Week Position", stats.get("52w_fail", 0)),
     ]
     
     has_rejections = False
@@ -4022,6 +5185,27 @@ def export_results(results: List[Dict], scan_time: float):
                 "RiskReward": res["risk_reward"],
                 "Quantity": res["qty"],
                 "Sector": res["sector"],
+
+                "52W_Position_Pct": res.get('fifty_two_week', {}).get('position_pct', ''),
+                "52W_High": res.get('fifty_two_week', {}).get('high_52w', ''),
+                "52W_Low": res.get('fifty_two_week', {}).get('low_52w', ''),
+                "52W_Signal": res.get('fifty_two_week', {}).get('signal', ''),
+                
+                "RS_vs_Nifty": res.get('relative_strength', {}).get('avg_rs', ''),
+                "RS_Signal": res.get('relative_strength', {}).get('signal', ''),
+                
+                "Delivery_Score": res.get('delivery_estimate', {}).get('estimated_delivery_score', ''),
+                
+                "Earnings_Safe": res.get('earnings_info', {}).get('safe_to_trade', True),
+                "Earnings_Days": res.get('earnings_info', {}).get('days_until', ''),
+                
+                "Consolidation_Type": res.get('consolidation', {}).get('breakout_type', ''),
+                "Consolidation_Days": res.get('consolidation', {}).get('consolidation_days', ''),
+                
+                "Market_Regime": res.get('market_regime', 'N/A'),
+                
+                "Trailing_Stop_ATR": res.get('trailing_stops', {}).get('atr', {}).get('trailing_stop', ''),
+                "Trailing_Stop_Pct": res.get('trailing_stops', {}).get('percent', {}).get('trailing_stop', ''),
                 "Reasons": res["reasons"],
             }
             
@@ -4330,6 +5514,21 @@ def main():
     portfolio_mgr = PortfolioRiskManager(ACCOUNT_CAPITAL) if USE_PORTFOLIO_RISK else None
     mtf_analyzer = MultiTimeframeAnalyzer()
     
+    fifty_two_week_analyzer = FiftyTwoWeekAnalyzer if USE_52_WEEK_FILTER else None
+    rs_analyzer = RelativeStrengthAnalyzer() if USE_RELATIVE_STRENGTH else None
+    delivery_analyzer = DeliveryVolumeAnalyzer if USE_DELIVERY_VOLUME else None
+    earnings_filter = EarningsFilter if USE_EARNINGS_FILTER else None
+    consolidation_detector = ConsolidationBreakoutDetector if USE_CONSOLIDATION_BREAKOUT else None
+    market_breadth = MarketBreadthAnalyzer() if USE_MARKET_BREADTH else None
+
+     # Get market breadth once (for all stocks)
+    market_breadth_data = None
+    if market_breadth and USE_MARKET_BREADTH:
+        print("  └─ Analyzing market breadth...")
+        market_breadth_data = market_breadth.analyze()
+        if market_breadth_data.get('valid'):
+            print(f"      └─ {market_breadth_data.get('message', 'Unknown')}")
+    
     if sector_filter:
         print("  └─ Updating sector data...")
         sector_filter.update_sector_strength()
@@ -4382,7 +5581,7 @@ def main():
         unique_closes = test_data['Close'].nunique()
         min_price = test_data['Close'].min()
         max_price = test_data['Close'].max()
-        price_range = max_price - min_price
+        
         
         # Check if data looks valid
         uniqueness_ratio = unique_closes / rows if rows > 0 else 0
@@ -4419,8 +5618,21 @@ def main():
     
     if BACKTEST_MODE in ['HYBRID', 'FULL']:
         results = hybrid_scan_universe(
-            tickers, df_all, quality_validator, sector_filter,
-            vix_filter, fibo_detector, portfolio_mgr, mtf_analyzer
+           tickers=tickers,
+            df_all=df_all,
+            quality_validator=quality_validator,
+            sector_filter=sector_filter,
+            vix_filter=vix_filter,
+            fibo_detector=fibo_detector,
+            portfolio_mgr=portfolio_mgr,
+            mtf_analyzer=mtf_analyzer,
+            # ADD THESE NEW PARAMETERS:
+            fifty_two_week_analyzer=fifty_two_week_analyzer,
+            rs_analyzer=rs_analyzer,
+            delivery_analyzer=delivery_analyzer,
+            earnings_filter=earnings_filter,
+            consolidation_detector=consolidation_detector,
+            market_breadth_data=market_breadth_data
         )
     else:
         print(f"\n{'='*120}")
@@ -4433,7 +5645,12 @@ def main():
             result = scan_ticker(
                 ticker, df_all, quality_validator, sector_filter,
                 vix_filter, fibo_detector, portfolio_mgr, mtf_analyzer,
-                backtester=None, run_full_backtest=False
+                backtester=None, run_full_backtest=False,fifty_two_week_analyzer=fifty_two_week_analyzer,
+                rs_analyzer=rs_analyzer,
+                delivery_analyzer=delivery_analyzer,
+                earnings_filter=earnings_filter,
+                consolidation_detector=consolidation_detector,
+                market_breadth_data=market_breadth_data
             )
             
             if result:
@@ -4472,6 +5689,20 @@ def main():
         return
     
     print_results(results)
+     # ═══════════════════════════════════════════════════════════════
+    # ADD THIS: WEEKLY PICK SELECTION
+    # ═══════════════════════════════════════════════════════════════
+    
+    print("\n" + "="*80)
+    print("🎯 RUNNING WEEKLY PICK SELECTOR...")
+    print("="*80)
+    
+    weekly_picks = select_weekly_picks(results, max_picks=2)
+    print_weekly_picks(weekly_picks)
+    
+    # Save weekly picks to separate file
+    if weekly_picks:
+        save_weekly_picks(weekly_picks)
     
     scan_time = time.time() - start_time
     export_results(results, scan_time)
@@ -4504,30 +5735,13 @@ def main():
     print("\n" + "="*120 + "\n")
     return results
 
-# ============================================================================
-# ENTRY POINT
-# ============================================================================
 
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Scan interrupted by user")
-        print_statistics()
-    except Exception as e:
-        print(f"\n\n❌ Fatal error: {e}")
-        logger.exception("Fatal error in main execution")
 # ============================================================================
 # EMAIL NOTIFICATION FUNCTION
 # ============================================================================
 
-
-# ============================================================================
-# MODIFIED MAIN FUNCTION FOR GITHUB ACTIONS
-# ============================================================================
-
 def send_email_notification(results, csv_file, html_file, scan_time):
-    """Send email with scan results - WITH GITHUB LINK"""
+    """Send email with scan results"""
     
     if not EMAIL_CONFIG['enabled']:
         logger.info("Email notifications disabled")
@@ -4542,11 +5756,7 @@ def send_email_notification(results, csv_file, html_file, scan_time):
         msg = MIMEMultipart('alternative')
         msg['From'] = EMAIL_CONFIG['sender_email']
         msg['To'] = EMAIL_CONFIG['recipient_email']
-        msg['Subject'] = f"NSE Scanner - {datetime.now().strftime('%Y-%m-%d')} - {len(results)} Signals"
-        
-        # ADD GITHUB LINK TO EMAIL BODY
-        github_repo = os.environ.get('GITHUB_REPOSITORY', 'your-repo')
-        github_url = f"https://github.com/{github_repo}/tree/main/latest_reports"
+        msg['Subject'] = f"📊 NSE Scanner - {datetime.now().strftime('%Y-%m-%d')} - {len(results)} Signals"
         
         # Email body
         body = f"""
@@ -4558,15 +5768,6 @@ Scan Time: {scan_time:.1f} seconds
 Total Signals: {len(results)}
 
 {'='*70}
-
-VIEW FULL REPORT ON GITHUB:
-{github_url}
-
-Direct Links:
-- HTML Report: {github_url}/latest_report.html
-- CSV Data: {github_url}/latest_signals.csv
-
-{'='*70}
 TOP 5 SIGNALS:
 {'='*70}
 """
@@ -4574,24 +5775,24 @@ TOP 5 SIGNALS:
         for i, res in enumerate(results[:5], 1):
             body += f"""
 {i}. {res['ticker']} - {res['side']}
-   Price: Rs.{res['price']:.2f}
-   Confidence: {res['confidence']:.1f}%
-   Entry: Rs.{res['entry_price']:.2f}
-   Stop Loss: Rs.{res['stop_loss']:.2f}
-   Target 1: Rs.{res['target_1']:.2f}
-   R:R Ratio: {res['risk_reward']:.1f}x
-   Quantity: {res['qty']} shares
+   💰 Price: ₹{res['price']:.2f}
+   🎯 Confidence: {res['confidence']:.1f}%
+   📈 Entry: ₹{res['entry_price']:.2f}
+   🛑 Stop Loss: ₹{res['stop_loss']:.2f}
+   🎯 Target 1: ₹{res['target_1']:.2f}
+   📊 R:R Ratio: {res['risk_reward']:.1f}x
+   📦 Quantity: {res['qty']} shares
 """
         
         body += f"""
 {'='*70}
 
-Full reports attached (CSV & HTML)
+📎 Full reports attached (CSV & HTML)
 
-GitHub Repository: https://github.com/{github_repo}
+🔗 View all results: https://github.com/{os.environ.get('GITHUB_REPOSITORY', 'your-repo')}
 
 This is an automated message from NSE Scanner v8.5
-Running on GitHub Actions
+Running on GitHub Actions ⚡
 """
         
         msg.attach(MIMEText(body, 'plain'))
@@ -4620,10 +5821,99 @@ Running on GitHub Actions
             server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
             server.send_message(msg)
         
-        logger.info("Email notification sent successfully")
+        logger.info("✅ Email notification sent successfully")
         
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+        logger.error(f"❌ Failed to send email: {e}")
+
+# ============================================================================
+# MODIFIED MAIN FUNCTION FOR GITHUB ACTIONS
+# ============================================================================
+
+def github_actions_main():
+    """Main function optimized for GitHub Actions execution - FIXED VERSION"""
+    
+    logger.info("="*80)
+    logger.info("NSE SCANNER v8.5 - GITHUB ACTIONS EXECUTION")
+    logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
+    logger.info(f"GitHub Repository: {os.environ.get('GITHUB_REPOSITORY', 'N/A')}")
+    logger.info(f"Workflow Run: #{os.environ.get('GITHUB_RUN_NUMBER', 'N/A')}")
+    logger.info("="*80)
+    
+    import time
+    start_time = time.time()
+    
+    try:
+        logger.info("🚀 Starting stock scan...")
+        
+        # ✅ FIX: main() already returns results
+        results = main()
+        
+        scan_time = time.time() - start_time
+        
+        # ✅ FIX: Check if results exist AND have data
+        if results and len(results) > 0:
+            logger.info(f"✅ Scan complete: {len(results)} signals found in {scan_time:.1f}s")
+            
+            # ✅ FIX: Use correct directory name
+            signals_dir = f"signals_v8.5_{ACCURACY_MODE.lower()}"
+            logger.info(f"📂 Looking for files in: {signals_dir}/")
+            
+            # Find the latest files
+            csv_file = None
+            html_file = None
+            
+            if os.path.exists(signals_dir):
+                csv_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.csv')])
+                html_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.html')])
+                
+                if csv_files:
+                    csv_file = os.path.join(signals_dir, csv_files[-1])
+                    logger.info(f"📄 Found CSV: {csv_file}")
+                
+                if html_files:
+                    html_file = os.path.join(signals_dir, html_files[-1])
+                    logger.info(f"📄 Found HTML: {html_file}")
+                
+                # ✅ Copy files to standard location for artifacts
+                copy_files_to_output(signals_dir)
+            else:
+                logger.warning(f"⚠️  Directory not found: {signals_dir}")
+            
+            # ✅ Send email with files
+            logger.info("📧 Sending email notification...")
+            send_email_notification(results, csv_file, html_file, scan_time)
+            
+        else:
+            logger.info(f"⚠️  No signals found in {scan_time:.1f}s")
+            send_no_signals_email(scan_time)
+        
+        logger.info("="*80)
+        logger.info("✅ GitHub Actions execution completed successfully")
+        logger.info("="*80)
+        
+        return 0
+        
+    except Exception as e:
+        logger.error(f"❌ FATAL ERROR: {e}", exc_info=True)
+        
+        # Send error notification
+        if EMAIL_CONFIG['enabled'] and EMAIL_CONFIG['sender_email']:
+            try:
+                msg = MIMEText(f"Scanner error:\n\n{str(e)}\n\nCheck logs.")
+                msg['Subject'] = "⚠️ NSE Scanner Error"
+                msg['From'] = EMAIL_CONFIG['sender_email']
+                msg['To'] = EMAIL_CONFIG['recipient_email']
+                
+                with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+                    server.starttls()
+                    server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+                    server.send_message(msg)
+            except:
+                pass
+        
+        return 1
+
 
 def send_no_signals_email(scan_time):
     """Send notification when no signals found"""
@@ -4672,178 +5962,7 @@ This is an automated message from NSE Scanner v8.5
         
     except Exception as e:
         logger.error(f"❌ Email send failed: {e}")
-def commit_reports_to_github():
-    """Commit signal reports to GitHub repository"""
-    
-    try:
-        import subprocess
-        
-        logger.info("="*80)
-        logger.info("COMMITTING REPORTS TO GITHUB")
-        logger.info("="*80)
-        
-        # Configure git
-        subprocess.run(['git', 'config', '--global', 'user.email', 'scanner@github-actions'], check=True)
-        subprocess.run(['git', 'config', '--global', 'user.name', 'NSE Scanner Bot'], check=True)
-        
-        # Create/update reports directory with fixed name
-        reports_dir = "latest_reports"
-        os.makedirs(reports_dir, exist_ok=True)
-        
-        # Find latest files
-        signals_dir = f"signals_v8.5_{ACCURACY_MODE.lower()}"
-        
-        if not os.path.exists(signals_dir):
-            logger.warning(f"No signals directory found: {signals_dir}")
-            return False
-        
-        # Get latest CSV and HTML files
-        csv_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.csv')])
-        html_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.html')])
-        
-        if not csv_files or not html_files:
-            logger.warning("No report files found to commit")
-            return False
-        
-        latest_csv = csv_files[-1]
-        latest_html = html_files[-1]
-        
-        # Copy to fixed-name files (these will be replaced each run)
-        import shutil
-        
-        # Use fixed names so GitHub always has the latest
-        fixed_csv_name = "latest_signals.csv"
-        fixed_html_name = "latest_report.html"
-        
-        shutil.copy2(
-            os.path.join(signals_dir, latest_csv),
-            os.path.join(reports_dir, fixed_csv_name)
-        )
-        logger.info(f"Copied {latest_csv} -> {fixed_csv_name}")
-        
-        shutil.copy2(
-            os.path.join(signals_dir, latest_html),
-            os.path.join(reports_dir, fixed_html_name)
-        )
-        logger.info(f"Copied {latest_html} -> {fixed_html_name}")
-        
-        # Also create a timestamped version for history
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        history_dir = os.path.join(reports_dir, "history")
-        os.makedirs(history_dir, exist_ok=True)
-        
-        shutil.copy2(
-            os.path.join(signals_dir, latest_csv),
-            os.path.join(history_dir, f"signals_{timestamp}.csv")
-        )
-        
-        shutil.copy2(
-            os.path.join(signals_dir, latest_html),
-            os.path.join(history_dir, f"report_{timestamp}.html")
-        )
-        logger.info(f"Created timestamped copies in history/")
-        
-        # Create README with direct link
-        readme_content = f"""# NSE Scanner v8.5 - Latest Reports
 
-**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}
-
-## Latest Report
-
-[**View HTML Report**](latest_report.html)  
-[Download CSV](latest_signals.csv)
-
-## Recent Scans
-
-| Date | HTML | CSV |
-|------|------|-----|
-"""
-        
-        # Add recent history entries (last 10)
-        history_files = sorted(
-            [(f, os.path.getmtime(os.path.join(history_dir, f))) 
-             for f in os.listdir(history_dir) if f.endswith('.html')],
-            key=lambda x: x[1],
-            reverse=True
-        )
-        
-        for html_file, _ in history_files[:10]:
-            date_str = html_file.replace('report_', '').replace('.html', '')
-            csv_file = html_file.replace('report_', 'signals_').replace('.html', '.csv')
-            
-            # Format date nicely
-            try:
-                dt = datetime.strptime(date_str, '%Y%m%d_%H%M%S')
-                display_date = dt.strftime('%Y-%m-%d %H:%M')
-            except:
-                display_date = date_str
-            
-            readme_content += f"| {display_date} | [HTML](history/{html_file}) | [CSV](history/{csv_file}) |\n"
-        
-        readme_content += f"""
-## Configuration
-
-- **Mode:** {ACCURACY_MODE}
-- **Backtest:** {BACKTEST_MODE}
-- **Min Confidence:** {MIN_CONFIDENCE}%
-- **Min R:R Ratio:** {MIN_RR_RATIO}x
-
-## Automated Execution
-
-This scanner runs automatically via GitHub Actions:
-- **Schedule:** Daily at 4:00 PM IST (market close)
-- **Email:** Results sent to configured email
-- **Storage:** Reports stored in this directory
-
----
-
-*Powered by NSE Scanner v8.5 - Ultimate Accuracy Edition*
-"""
-        
-        readme_path = os.path.join(reports_dir, "README.md")
-        with open(readme_path, 'w', encoding='utf-8') as f:
-            f.write(readme_content)
-        
-        logger.info("Created README.md")
-        
-        # Git operations
-        logger.info("Committing to git...")
-        
-        # Stage all files in reports directory
-        subprocess.run(['git', 'add', reports_dir], check=True)
-        
-        # Check if there are changes
-        result = subprocess.run(
-            ['git', 'status', '--porcelain'],
-            capture_output=True,
-            text=True
-        )
-        
-        if not result.stdout.strip():
-            logger.info("No changes to commit")
-            return True
-        
-        # Commit with message
-        commit_msg = f"Update scanner reports - {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}"
-        subprocess.run(['git', 'commit', '-m', commit_msg], check=True)
-        
-        # Push to GitHub
-        logger.info("Pushing to GitHub...")
-        subprocess.run(['git', 'push'], check=True)
-        
-        logger.info("="*80)
-        logger.info("Reports committed to GitHub successfully!")
-        logger.info(f"View at: https://github.com/{os.environ.get('GITHUB_REPOSITORY', '')}/tree/main/latest_reports")
-        logger.info("="*80)
-        
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Git command failed: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"Failed to commit to GitHub: {e}", exc_info=True)
-        return False
 
 def copy_files_to_output(source_dir):
     """Copy signal files to standard output directory for GitHub Actions"""
@@ -4857,7 +5976,7 @@ def copy_files_to_output(source_dir):
             logger.warning(f"Source directory not found: {source_dir}")
             return
         
-        import shutil
+        
         copied = 0
         
         # Copy all CSV and HTML files
@@ -4879,103 +5998,192 @@ def copy_files_to_output(source_dir):
         
     except Exception as e:
         logger.error(f"⚠️  Failed to copy files: {e}")
-
-def github_actions_main():
-    """Main function optimized for GitHub Actions execution - FIXED WITH EMAIL"""
-    
-    logger.info("="*80)
-    logger.info("NSE SCANNER v8.5 - GITHUB ACTIONS EXECUTION")
-    logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
-    logger.info(f"GitHub Repository: {os.environ.get('GITHUB_REPOSITORY', 'N/A')}")
-    logger.info(f"Workflow Run: #{os.environ.get('GITHUB_RUN_NUMBER', 'N/A')}")
-    logger.info("="*80)
-    
-    import time
-    start_time = time.time()
-    
-    try:
-        logger.info("Starting stock scan...")
-        
-        # Run main scanner
-        results = main()
-        
-        scan_time = time.time() - start_time
-        
-        # Check if results exist AND have data
-        if results and len(results) > 0:
-            logger.info(f"Scan complete: {len(results)} signals found in {scan_time:.1f}s")
-            
-            # Use correct directory name
-            signals_dir = f"signals_v8.5_{ACCURACY_MODE.lower()}"
-            logger.info(f"Looking for files in: {signals_dir}/")
-            
-            # Find the latest files
-            csv_file = None
-            html_file = None
-            
-            if os.path.exists(signals_dir):
-                csv_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.csv')])
-                html_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.html')])
-                
-                if csv_files:
-                    csv_file = os.path.join(signals_dir, csv_files[-1])
-                    logger.info(f"Found CSV: {csv_file}")
-                
-                if html_files:
-                    html_file = os.path.join(signals_dir, html_files[-1])
-                    logger.info(f"Found HTML: {html_file}")
-                
-                # Copy files to standard location for artifacts
-                copy_files_to_output(signals_dir)
-            else:
-                logger.warning(f"Directory not found: {signals_dir}")
-            
-            # ===================================================================
-            # FIX: ADD EMAIL NOTIFICATION HERE
-            # ===================================================================
-            logger.info("="*80)
-            logger.info("SENDING EMAIL NOTIFICATION")
-            logger.info("="*80)
-            
-            send_email_notification(results, csv_file, html_file, scan_time)
-            
-            logger.info("Email notification completed")
-            # ===================================================================
-            
-        else:
-            logger.info(f"No signals found in {scan_time:.1f}s")
-            
-            # Send no-signals email
-            send_no_signals_email(scan_time)
-        
-        logger.info("="*80)
-        logger.info("GitHub Actions execution completed successfully")
-        logger.info("="*80)
-        
-        return 0
-        
-    except Exception as e:
-        logger.error(f"FATAL ERROR: {e}", exc_info=True)
-        
-        # Send error notification
-        if EMAIL_CONFIG['enabled'] and EMAIL_CONFIG['sender_email']:
-            try:
-                msg = MIMEText(f"Scanner error:\n\n{str(e)}\n\nCheck logs.")
-                msg['Subject'] = "NSE Scanner Error"
-                msg['From'] = EMAIL_CONFIG['sender_email']
-                msg['To'] = EMAIL_CONFIG['recipient_email']
-                
-                with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
-                    server.starttls()
-                    server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
-                    server.send_message(msg)
-            except:
-                pass
-        
-        return 1
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
+# ============================================================================
+# WEEKLY PICK SELECTOR - ADD THIS TO YOUR SCANNER
+# ============================================================================
+
+def select_weekly_picks(results: List[Dict], max_picks: int = 2) -> List[Dict]:
+    """
+    Ultra-selective filter for weekly trading
+    Only returns the ABSOLUTE BEST 1-2 stocks
+    
+    Requirements:
+    - Tier 1 only
+    - Confidence ≥ 75%
+    - Backtest validated
+    - R:R ≥ 2.0
+    - 52W position ≥ 70%
+    - RS vs Nifty ≥ 1.05
+    - No earnings within 7 days
+    - Consolidation breakout OR VCP pattern
+    """
+    
+    weekly_picks = []
+    
+    for stock in results:
+        score = 0
+        disqualified = False
+        reasons = []
+        
+        # ═══════════════════════════════════════════════════════════════
+        # MANDATORY CHECKS (Must pass ALL)
+        # ═══════════════════════════════════════════════════════════════
+        
+        # Check 1: Must be Tier 1
+        if stock.get('tier') != 'TIER_1_PREMIUM':
+            disqualified = True
+            reasons.append(f"Not Tier 1 ({stock.get('tier', 'Unknown')})")
+        
+        # Check 2: Confidence ≥ 75%
+        if stock.get('confidence', 0) < 75:
+            disqualified = True
+            reasons.append(f"Low confidence ({stock.get('confidence', 0):.1f}%)")
+        
+        # Check 3: Backtest validated
+        if not stock.get('backtest_validated', False):
+            disqualified = True
+            reasons.append("Not backtest validated")
+        
+        # Check 4: R:R ≥ 2.0
+        if stock.get('risk_reward', 0) < 2.0:
+            disqualified = True
+            reasons.append(f"Low R:R ({stock.get('risk_reward', 0):.1f}x)")
+        
+        # Check 5: No earnings within 7 days
+        earnings_info = stock.get('earnings_info', {})
+        if earnings_info.get('earnings_soon', False):
+            disqualified = True
+            reasons.append("Earnings upcoming")
+        
+        if disqualified:
+            continue
+        
+        # ═══════════════════════════════════════════════════════════════
+        # QUALITY SCORING (Higher = Better)
+        # ═══════════════════════════════════════════════════════════════
+        
+        # 52-Week Position (max 25 points)
+        ftw = stock.get('fifty_two_week', {})
+        position_pct = ftw.get('position_pct', 50)
+        if position_pct >= 85:
+            score += 25
+        elif position_pct >= 70:
+            score += 20
+        elif position_pct >= 60:
+            score += 10
+        else:
+            score -= 10  # Near 52W low = bad
+        
+        # Relative Strength (max 20 points)
+        rs = stock.get('relative_strength', {})
+        avg_rs = rs.get('avg_rs', 1.0)
+        if avg_rs >= 1.20:
+            score += 20
+        elif avg_rs >= 1.10:
+            score += 15
+        elif avg_rs >= 1.05:
+            score += 10
+        elif avg_rs < 0.95:
+            score -= 15  # Underperforming = bad
+        
+        # Consolidation Breakout (max 20 points)
+        cons = stock.get('consolidation', {})
+        if cons.get('breakout_type') == 'BULLISH' and stock['side'] == 'LONG':
+            score += 20
+        elif cons.get('breakout_type') == 'BEARISH' and stock['side'] == 'SHORT':
+            score += 20
+        elif cons.get('breakout_type') == 'PENDING':
+            score += 5
+        
+        # Backtest Quality (max 20 points)
+        bt = stock.get('backtest', {})
+        if bt.get('win_rate', 0) >= 65:
+            score += 20
+        elif bt.get('win_rate', 0) >= 60:
+            score += 15
+        elif bt.get('win_rate', 0) >= 55:
+            score += 10
+        
+        if bt.get('profit_factor', 0) >= 2.0:
+            score += 10
+        elif bt.get('profit_factor', 0) >= 1.7:
+            score += 5
+        
+        # Confidence Bonus (max 15 points)
+        conf = stock.get('confidence', 0)
+        if conf >= 85:
+            score += 15
+        elif conf >= 80:
+            score += 10
+        elif conf >= 75:
+            score += 5
+        
+        # Add to weekly picks with score
+        stock['weekly_score'] = score
+        weekly_picks.append(stock)
+    
+    # Sort by weekly score (highest first)
+    weekly_picks = sorted(weekly_picks, key=lambda x: x['weekly_score'], reverse=True)
+    
+    # Return top picks only
+    return weekly_picks[:max_picks]
+
+
+def print_weekly_picks(picks: List[Dict]):
+    """Print weekly picks in clear format"""
+    
+    if not picks:
+        print("\n" + "="*80)
+        print("❌ NO WEEKLY PICKS TODAY")
+        print("="*80)
+        print("\n💡 Reasons:")
+        print("   • No stocks meet ultra-strict criteria")
+        print("   • Wait for better setup tomorrow")
+        print("   • Quality > Quantity")
+        print("="*80)
+        return
+    
+    print("\n" + "="*80)
+    print("🏆 WEEKLY PICK(S) - HIGHEST CONVICTION TRADES")
+    print("="*80)
+    
+    for i, pick in enumerate(picks, 1):
+        print(f"""
+┌{'─'*76}┐
+│ #{i} {pick['ticker']:<15} {pick['side']:<6}                    SCORE: {pick['weekly_score']}/100 │
+├{'─'*76}┤
+│                                                                            │
+│  💰 ENTRY DETAILS                                                          │
+│  ├── Current Price:    ₹{pick['price']:<12.2f}                             │
+│  ├── Entry Price:      ₹{pick['entry_price']:<12.2f}                       │
+│  ├── Stop Loss:        ₹{pick['stop_loss']:<12.2f}                         │
+│  ├── Target 1:         ₹{pick['target_1']:<12.2f}                          │
+│  ├── Target 2:         ₹{pick['target_2']:<12.2f}                          │
+│  └── Quantity:         {pick['qty']} shares                                │
+│                                                                            │
+│  📊 QUALITY METRICS                                                        │
+│  ├── Confidence:       {pick['confidence']:.1f}%                           │
+│  ├── Risk:Reward:      {pick['risk_reward']:.1f}x                          │
+│  ├── 52W Position:     {pick.get('fifty_two_week', {}).get('position_pct', 'N/A')}%                      │
+│  ├── RS vs Nifty:      {pick.get('relative_strength', {}).get('avg_rs', 'N/A')}x                        │
+│  └── Backtest WR:      {pick.get('backtest', {}).get('win_rate', 'N/A')}%                          │
+│                                                                            │
+│  ✅ WHY THIS STOCK                                                         │
+│  {pick['reasons'][:70]:<72} │
+│                                                                            │
+└{'─'*76}┘
+""")
+    
+    print("="*80)
+    print("⚠️  EXECUTION RULES:")
+    print("   • Enter only if price is within 1% of entry price")
+    print("   • Use limit orders, not market orders")
+    print("   • Enter after 10:00 AM (avoid opening volatility)")
+    print("   • If SL is hit, accept it - no averaging down")
+    print("="*80)
 
 if __name__ == "__main__":
 
