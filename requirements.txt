@@ -14,7 +14,7 @@ google-api-python-client>=2.100.0
 streamlit-autorefresh
 
 # TensorFlow - CPU version for Streamlit Cloud
-tensorflow-cpu==2.15.0
+tensorflow-cpu==2.20.0
 
 # Lightweight ML libraries
 textblob
