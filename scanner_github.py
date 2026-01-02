@@ -233,15 +233,19 @@ def update_google_sheet(signals_data):
             return False
         
         # Format all signals into rows
+        sorted_signals = sorted(signals_data, key=lambda x: x.get('Confidence', 0), reverse=True)
+        top_5_signals = sorted_signals[:5]  # Take only top 5
+
+        logger.info(f"📊 Total signals: {len(signals_data)}, selecting top 5 by confidence")
+        
         rows_to_add = []
-        for signal in signals_data:
+        for signal in top_5_signals:
             row = format_sheet_row(signal, tomorrow)
             if row:
                 rows_to_add.append(row)
+
+        logger.info(f"📝 Formatted {len(rows_to_add)} rows for Google Sheet (Top 5 by Confidence)")
         
-        if not rows_to_add:
-            logger.warning("No valid rows to add to Google Sheet")
-            return False
         
         logger.info(f"📝 Formatted {len(rows_to_add)} rows for Google Sheet")
         
