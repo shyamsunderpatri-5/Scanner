@@ -130,41 +130,115 @@ def format_sheet_row(signal_data, entry_date):
         List of values for the row
     """
     try:
-        # Extract values from signal_data
-        ticker = signal_data.get('Ticker', 'N/A')
-        position = signal_data.get('Signal', 'N/A')  # 'LONG' or 'SHORT'
-        entry_price = signal_data.get('CMP', 0)
-        stop_loss = signal_data.get('Stop_Loss', 0)
-        target_1 = signal_data.get('Target_1', 0)
-        target_2 = signal_data.get('Target_2', 0)
+        # Extract values from signal_data with CORRECT column names from your CSV
+        ticker = signal_data.get('TICKER', signal_data.get('Ticker', 'N/A'))
         
-        # Calculate suggested quantity (example: ₹10,000 per trade divided by entry price)
-        # Adjust this logic based on your risk management
+        # Position (LONG/SHORT) - Try multiple possible column names
+        position = (signal_data.get('SIDE', '') or 
+                   signal_data.get('Signal', '') or 
+                   signal_data.get('Position', 'N/A'))
+        
+        # Entry Price - Try multiple possible column names
+        entry_price = (signal_data.get('PRICE', 0) or 
+                      signal_data.get('CMP', 0) or 
+                      signal_data.get('Entry_Price', 0) or
+                      signal_data.get('ENTRY', 0))
+        
+        # Convert entry_price to float if it's a string
+        if isinstance(entry_price, str):
+            # Remove ₹ symbol and commas
+            entry_price = entry_price.replace('₹', '').replace(',', '').strip()
+            try:
+                entry_price = float(entry_price)
+            except:
+                entry_price = 0
+        
+        # Stop Loss - Try multiple possible column names
+        stop_loss = (signal_data.get('SL', 0) or 
+                    signal_data.get('Stop_Loss', 0) or 
+                    signal_data.get('STOP_LOSS', 0))
+        
+        if isinstance(stop_loss, str):
+            stop_loss = stop_loss.replace('₹', '').replace(',', '').strip()
+            try:
+                stop_loss = float(stop_loss)
+            except:
+                stop_loss = 0
+        
+        # Target 1 - Try multiple possible column names
+        target_1 = (signal_data.get('T1', 0) or 
+                   signal_data.get('Target_1', 0) or 
+                   signal_data.get('TARGET_1', 0))
+        
+        if isinstance(target_1, str):
+            target_1 = target_1.replace('₹', '').replace(',', '').strip()
+            try:
+                target_1 = float(target_1)
+            except:
+                target_1 = 0
+        
+        # Target 2 - Try multiple possible column names
+        target_2 = (signal_data.get('T2', 0) or 
+                   signal_data.get('Target_2', 0) or 
+                   signal_data.get('TARGET_2', 0))
+        
+        if isinstance(target_2, str):
+            target_2 = target_2.replace('₹', '').replace(',', '').strip()
+            try:
+                target_2 = float(target_2)
+            except:
+                target_2 = 0
+        
+        # Calculate suggested quantity (₹10,000 per trade divided by entry price)
         quantity = int(10000 / entry_price) if entry_price > 0 else 0
         
+        # Get Confidence and R:R
+        confidence = signal_data.get('CONF', signal_data.get('Confidence', 0))
+        
+        # Handle confidence if it's a percentage string like "98.4%"
+        if isinstance(confidence, str):
+            confidence = confidence.replace('%', '').strip()
+            try:
+                confidence = float(confidence)
+            except:
+                confidence = 0
+        
+        # Get R:R ratio
+        rr_ratio = signal_data.get('R:R', signal_data.get('RR', signal_data.get('R_R', 0)))
+        
+        # Handle R:R if it's a string like "1.9x"
+        if isinstance(rr_ratio, str):
+            rr_ratio = rr_ratio.replace('x', '').strip()
+            try:
+                rr_ratio = float(rr_ratio)
+            except:
+                rr_ratio = 0
+        
         # Create notes from additional data
-        confidence = signal_data.get('Confidence', 0)
-        rr_ratio = signal_data.get('R:R', 0)
         notes = f"Confidence: {confidence}%, R:R: {rr_ratio}"
         
         # Format row
         row = [
             ticker,
             position,
-            round(entry_price, 2),
+            round(float(entry_price), 2) if entry_price else 0,
             quantity,
-            round(stop_loss, 2),
-            round(target_1, 2),
-            round(target_2, 2),
+            round(float(stop_loss), 2) if stop_loss else 0,
+            round(float(target_1), 2) if target_1 else 0,
+            round(float(target_2), 2) if target_2 else 0,
             entry_date,
             'PENDING',  # Initial status
             notes
         ]
         
+        # Debug log to help troubleshoot
+        logger.info(f"Formatted row for {ticker}: Price={entry_price}, SL={stop_loss}, T1={target_1}, T2={target_2}")
+        
         return row
         
     except Exception as e:
         logger.error(f"Error formatting row: {e}")
+        logger.error(f"Signal data keys: {signal_data.keys()}")
         return None
 
 
