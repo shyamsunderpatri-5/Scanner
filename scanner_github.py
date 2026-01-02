@@ -134,7 +134,7 @@ def format_sheet_row(signal_data, entry_date):
         ticker = signal_data.get('TICKER', signal_data.get('Ticker', 'N/A'))
         
         # Position (LONG/SHORT) - Try multiple possible column names
-        position = (signal_data.get('SIDE', '') or 
+        position = (signal_data.get('Side', '') or 
                    signal_data.get('Signal', '') or 
                    signal_data.get('Position', 'N/A'))
         
