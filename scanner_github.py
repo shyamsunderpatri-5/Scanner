@@ -139,7 +139,7 @@ def format_sheet_row(signal_data, entry_date):
                    signal_data.get('Position', 'N/A'))
         
         # Entry Price - Try multiple possible column names
-        entry_price = (signal_data.get('PRICE', 0) or 
+        entry_price = (signal_data.get('Price', 0) or 
                       signal_data.get('CMP', 0) or 
                       signal_data.get('Entry_Price', 0) or
                       signal_data.get('ENTRY', 0))
@@ -154,7 +154,7 @@ def format_sheet_row(signal_data, entry_date):
                 entry_price = 0
         
         # Stop Loss - Try multiple possible column names
-        stop_loss = (signal_data.get('SL', 0) or 
+        stop_loss = (signal_data.get('StopLoss', 0) or 
                     signal_data.get('Stop_Loss', 0) or 
                     signal_data.get('STOP_LOSS', 0))
         
@@ -166,7 +166,7 @@ def format_sheet_row(signal_data, entry_date):
                 stop_loss = 0
         
         # Target 1 - Try multiple possible column names
-        target_1 = (signal_data.get('T1', 0) or 
+        target_1 = (signal_data.get('Target1', 0) or 
                    signal_data.get('Target_1', 0) or 
                    signal_data.get('TARGET_1', 0))
         
@@ -178,7 +178,7 @@ def format_sheet_row(signal_data, entry_date):
                 target_1 = 0
         
         # Target 2 - Try multiple possible column names
-        target_2 = (signal_data.get('T2', 0) or 
+        target_2 = (signal_data.get('Target2', 0) or 
                    signal_data.get('Target_2', 0) or 
                    signal_data.get('TARGET_2', 0))
         
