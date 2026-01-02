@@ -4825,6 +4825,9 @@ def main():
                                 """)
                     else:
                         st.warning("MTF data not available for this stock")
+    # CRITICAL FIX: Lines 4829-4890 in pm.py
+# Replace these lines with the corrected version below:
+
     # =========================================================================
     # TAB 5: ML INSIGHTS (NEW!)
     # =========================================================================
@@ -4869,10 +4872,11 @@ def main():
                         # Anomaly
                         if r['ml'].get('anomaly') and r['ml']['anomaly'].get('has_anomaly'):
                             st.warning(f"⚠️ {r['ml']['anomaly']['description']}")
+    
     # =========================================================================
-    # TAB 5: PORTFOLIO RISK
+    # TAB 6: PORTFOLIO RISK
     # =========================================================================
-    with tab5:
+    with tab6:
         display_portfolio_risk_dashboard(portfolio_risk, sector_analysis)
         
         st.divider()
@@ -4886,15 +4890,15 @@ def main():
         display_correlation_analysis(results, settings['enable_correlation'])
     
     # =========================================================================
-    # TAB 6: PERFORMANCE
-    # =========================================================================
-    with tab6:
-        display_performance_dashboard()
-        # =========================================================================
-    # =========================================================================
-    # TAB 7: DETAILS
+    # TAB 7: PERFORMANCE
     # =========================================================================
     with tab7:
+        display_performance_dashboard()
+    
+    # =========================================================================
+    # TAB 8: DETAILS
+    # =========================================================================
+    with tab8:
         st.subheader("📋 Complete Analysis Data")
         
         details_data = []
