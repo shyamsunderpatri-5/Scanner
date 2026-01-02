@@ -22,3 +22,5 @@ vectorbt
 py_vollib
 lxml
 nltk
+streamlit-autorefresh
+tensorflow
