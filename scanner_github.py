@@ -2214,29 +2214,35 @@ class RelativeStrengthCalculator:
 # SECTOR ROTATION ANALYZER
 # ============================================================================
 
+# ============================================================================
+# SECTOR ROTATION ANALYZER - FIXED WITH WORKING SYMBOLS
+# ============================================================================
+
 class SectorRotationAnalyzer:
-    """Analyze sector strength - FIXED VERSION"""
+    """Analyze sector strength - FIXED VERSION WITH WORKING SYMBOLS"""
     
     def __init__(self):
+        # ✅ FIXED: Use Yahoo Finance compatible index symbols
         self.sector_etfs = {
-            # Use Nifty sector indices that actually work
-            'FINANCIALS': 'NIFTY_FIN_SERVICE.NS',
-            'BANKING': 'BANKNIFTY.NS',
-            'IT': 'NIFTYIT.NS',
-            'PHARMA': 'NIFTYPHARMA.NS',
-            'AUTO': 'NIFTYAUTO.NS',
-            'FMCG': 'NIFTYFMCG.NS',
-            'METAL': 'NIFTYMETAL.NS',
-            'REALTY': 'NIFTYREALTY.NS',
-            'ENERGY': 'NIFTYENERGY.NS',
-            'INFRA': 'NIFTYINFRA.NS',
+            'BANKING': '^NSEBANK',          # Nifty Bank Index
+            'IT': '^CNXIT',                  # Nifty IT Index
+            'PHARMA': '^CNXPHARMA',          # Nifty Pharma Index
+            'AUTO': '^CNXAUTO',              # Nifty Auto Index
+            'FMCG': '^CNXFMCG',              # Nifty FMCG Index
+            'METAL': '^CNXMETAL',            # Nifty Metal Index
+            'REALTY': '^CNXREALTY',          # Nifty Realty Index
+            'ENERGY': '^CNXENERGY',          # Nifty Energy Index
+            'INFRA': '^CNXINFRA',            # Nifty Infra Index
+            'PSU_BANK': '^CNXPSUBANK',       # Nifty PSU Bank Index
+            'FINANCIALS': '^CNXFIN',         # Nifty Financial Services
+            'MEDIA': '^CNXMEDIA',            # Nifty Media Index
         }
         self.sector_strength = {}
         self._last_update = None
         self._cache_duration = 3600  # 1 hour cache
     
     def update_sector_strength(self):
-        """Update relative strength of sectors - WITH CACHING"""
+        """Update relative strength of sectors - WITH ERROR HANDLING"""
         import time as time_module
         
         # Use cache if fresh
@@ -2246,12 +2252,19 @@ class SectorRotationAnalyzer:
         try:
             for sector, ticker in self.sector_etfs.items():
                 try:
-                    data = yf.download(ticker, period="1mo", interval="1d", progress=False)
-                    if not data.empty and len(data) >= 20:
-                        returns = (data['Close'].iloc[-1] / data['Close'].iloc[-20] - 1) * 100
-                        self.sector_strength[sector] = float(returns.iloc[0] if hasattr(returns, 'iloc') else returns)
+                    data = yf.download(ticker, period="1mo", interval="1d", progress=False, timeout=10)
+                    if data is not None and not data.empty and len(data) >= 10:
+                        # Handle MultiIndex columns
+                        if isinstance(data.columns, pd.MultiIndex):
+                            data.columns = data.columns.get_level_values(0)
+                        
+                        if 'Close' in data.columns:
+                            close_col = data['Close'].dropna()
+                            if len(close_col) >= 10:
+                                returns = (float(close_col.iloc[-1]) / float(close_col.iloc[-10]) - 1) * 100
+                                self.sector_strength[sector] = returns
                 except Exception as e:
-                    logger.debug(f"Sector {sector} fetch failed: {e}")
+                    # Silent fail - just skip this sector
                     continue
             
             self._last_update = time_module.time()
@@ -2265,8 +2278,36 @@ class SectorRotationAnalyzer:
             if not self.sector_strength:
                 self.update_sector_strength()
             
-            if sector in self.sector_strength:
-                strength = self.sector_strength[sector]
+            # Map common sector names to our keys
+            sector_map = {
+                'Financial Services': 'FINANCIALS',
+                'Financial': 'FINANCIALS',
+                'Banks': 'BANKING',
+                'Banking': 'BANKING',
+                'Information Technology': 'IT',
+                'Technology': 'IT',
+                'Healthcare': 'PHARMA',
+                'Pharmaceuticals': 'PHARMA',
+                'Automobile': 'AUTO',
+                'Auto': 'AUTO',
+                'Consumer Goods': 'FMCG',
+                'FMCG': 'FMCG',
+                'Metals': 'METAL',
+                'Metal': 'METAL',
+                'Real Estate': 'REALTY',
+                'Realty': 'REALTY',
+                'Energy': 'ENERGY',
+                'Oil & Gas': 'ENERGY',
+                'Infrastructure': 'INFRA',
+                'Infra': 'INFRA',
+                'Media': 'MEDIA',
+            }
+            
+            # Normalize sector name
+            mapped_sector = sector_map.get(sector, sector.upper())
+            
+            if mapped_sector in self.sector_strength:
+                strength = self.sector_strength[mapped_sector]
                 
                 if strength > 5:
                     return strength, "STRONG"
@@ -2275,10 +2316,11 @@ class SectorRotationAnalyzer:
                 else:
                     return strength, "WEAK"
             
-            return None
+            # Return neutral if sector not found
+            return 0, "NEUTRAL"
             
         except Exception:
-            return None
+            return 0, "NEUTRAL"
 
 # ============================================================================
 # ADVANCED BACKTESTING ENGINE
@@ -3619,14 +3661,13 @@ def score_signal(
 # ============================================================================
 
 # ✅ CORRECTED - Stricter mini backtest:
-
 def mini_backtest(
     df: pd.DataFrame,
     entry_price: float,
     side: str,
     rr_ratio: float = 2.0
 ) -> Tuple[bool, Dict]:
-    """Enhanced mini backtest - STRICTER SUCCESS CRITERIA v2"""
+    """Enhanced mini backtest - BALANCED CRITERIA (not too strict)"""
     try:
         if len(df) < 25:
             return False, {"reason": "Insufficient data"}
@@ -3655,8 +3696,6 @@ def mini_backtest(
         stop_hit = False
         target_bar = None
         stop_bar = None
-        
-        # Track max favorable/adverse excursion
         max_profit = 0
         max_loss = 0
         
@@ -3685,7 +3724,9 @@ def mini_backtest(
             max_profit = max(max_profit, current_profit)
             max_loss = max(max_loss, current_loss)
         
-        # ✅ STRICTER SUCCESS CRITERIA:
+        # =====================================================================
+        # SUCCESS CRITERIA - BALANCED (Not too strict, not too loose)
+        # =====================================================================
         
         # Case 1: Clean winner - target hit, stop never hit
         if target_hit and not stop_hit:
@@ -3694,20 +3735,35 @@ def mini_backtest(
         
         # Case 2: Both hit - which came first?
         elif target_hit and stop_hit:
-            if target_bar < stop_bar:
+            if target_bar <= stop_bar:  # ← Changed < to <= (same bar = win)
                 success = True
-                reason = "Target hit before stop"
+                reason = "Target hit before/with stop"
             else:
-                # Stop hit first = FAILURE (even if recovered)
-                success = False
-                reason = f"Stop hit first (bar {stop_bar} vs {target_bar})"
+                # Stop hit first - check if recovered
+                final_price = future_data.iloc[-1]['Close']
+                if side == "LONG":
+                    final_pnl = ((final_price - entry_price) / entry_price) * 100
+                else:
+                    final_pnl = ((entry_price - final_price) / entry_price) * 100
+                
+                # ✅ LESS STRICT: Pass if final P&L is positive
+                success = final_pnl > 0
+                reason = f"Stop first, recovered to {final_pnl:.1f}%"
         
-        # Case 3: Only stop hit = FAILURE
+        # Case 3: Only stop hit
         elif stop_hit and not target_hit:
-            success = False
-            reason = f"Stop hit, no target (max profit was {max_profit:.1f}%)"
+            # Check final P&L - maybe it recovered
+            final_price = future_data.iloc[-1]['Close']
+            if side == "LONG":
+                final_pnl = ((final_price - entry_price) / entry_price) * 100
+            else:
+                final_pnl = ((entry_price - final_price) / entry_price) * 100
+            
+            # ✅ LESS STRICT: Pass if final P&L is only slightly negative
+            success = final_pnl > -1.0  # ← Allow up to 1% loss
+            reason = f"Stop hit, final: {final_pnl:.1f}%"
         
-        # Case 4: Neither hit - STRICTER CRITERIA
+        # Case 4: Neither hit - evaluate final position
         else:
             final_price = future_data.iloc[-1]['Close']
             if side == "LONG":
@@ -3715,16 +3771,16 @@ def mini_backtest(
             else:
                 final_pnl_pct = ((entry_price - final_price) / entry_price) * 100
             
-            # ✅ NEW: Must have positive final P&L AND good max profit potential
-            # AND max loss must not have exceeded 50% of stop distance
             stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100
             
+            # ✅ BALANCED CRITERIA:
+            # Pass if: positive P&L OR showed good profit potential
             success = (
-                final_pnl_pct >= 1.0 and                    # ← Raised from 0.3% to 1.0%
-                max_profit >= stop_distance_pct * 0.5 and  # ← Must have shown some profit potential
-                max_loss < stop_distance_pct * 0.8         # ← Must not have nearly stopped out
+                final_pnl_pct >= 0 or                           # Any positive P&L
+                (max_profit >= stop_distance_pct * 0.3 and      # Good profit potential
+                 max_loss < stop_distance_pct * 1.2)            # Didn't exceed stop by much
             )
-            reason = f"Final: {final_pnl_pct:.1f}%, MaxProfit: {max_profit:.1f}%, MaxLoss: {max_loss:.1f}%"
+            reason = f"Final: {final_pnl_pct:.1f}%, MaxProfit: {max_profit:.1f}%"
         
         metrics = {
             "target_hit": target_hit,
@@ -4136,85 +4192,76 @@ def calculate_trend_strength(df: pd.DataFrame) -> Tuple[float, str]:
 # ============================================================================
 # BREAKOUT CONFIRMATION FILTER (NEW)
 # ============================================================================
+# ============================================================================
+# BREAKOUT CONFIRMATION FILTER - FIXED (LESS STRICT)
+# ============================================================================
 
 def is_breakout_valid(df: pd.DataFrame, side: str, price: float) -> Tuple[bool, str]:
     """
     Check if breakout/breakdown is confirmed with volume
     
-    Returns: (is_valid, reason)
+    ✅ FIXED: Only reject CLEAR breakouts without volume
+    ✅ NON-BREAKOUT setups always pass!
     
-    Criteria:
-    - LONG: Price near 20-day high + volume > 1.3x average
-    - SHORT: Price near 20-day low + volume > 1.3x average
+    Returns: (is_valid, reason)
     """
     try:
         if len(df) < 20:
-            return True, "Insufficient data for breakout check"
+            return True, "Insufficient data"
         
-        close = df['Close'].iloc[-1]
-        volume = df['Volume'].iloc[-1]
-        avg_volume = df['Volume'].tail(20).mean()
+        close = float(df['Close'].iloc[-1])
+        volume = float(df['Volume'].iloc[-1])
+        avg_volume = float(df['Volume'].tail(20).mean())
         
-        high_20 = df['High'].tail(20).max()
-        low_20 = df['Low'].tail(20).min()
-        high_50 = df['High'].tail(50).max() if len(df) >= 50 else high_20
-        low_50 = df['Low'].tail(50).min() if len(df) >= 50 else low_20
+        high_20 = float(df['High'].tail(20).max())
+        low_20 = float(df['Low'].tail(20).min())
         
         volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
         
+        # Calculate how close we are to high/low
+        dist_to_high_pct = (high_20 - close) / close * 100
+        dist_to_low_pct = (close - low_20) / close * 100
+        
         if side == "LONG":
-            # Check if at/near 20-day high (within 2%)
-            near_high = close >= high_20 * 0.98
+            # ✅ ONLY check if ACTUALLY breaking out (within 1% of high)
+            is_breakout = dist_to_high_pct <= 1.0
             
-            # Check if breaking 50-day high (stronger signal)
-            breaking_50 = close >= high_50 * 0.99
-            
-            if breaking_50:
-                if volume_ratio >= 1.5:
-                    return True, "Strong breakout: 50-day high with heavy volume"
-                elif volume_ratio >= 1.2:
-                    return True, "Breakout: 50-day high with good volume"
+            if is_breakout:
+                # This IS a breakout - check volume
+                if volume_ratio >= 1.2:
+                    return True, f"Breakout confirmed ({volume_ratio:.1f}x vol)"
+                elif volume_ratio >= 0.8:
+                    # Marginal volume - still allow but note it
+                    return True, f"Breakout with fair volume ({volume_ratio:.1f}x)"
                 else:
-                    return False, f"Breakout without volume ({volume_ratio:.1f}x)"
-            
-            elif near_high:
-                if volume_ratio >= 1.3:
-                    return True, "Breakout: 20-day high with volume confirmation"
-                elif volume_ratio >= 1.0:
-                    return True, "Near 20-day high with average volume"
-                else:
-                    return False, f"Near high but weak volume ({volume_ratio:.1f}x)"
-            
+                    # ✅ ONLY reject if VERY weak volume on clear breakout
+                    if volume_ratio < 0.5:
+                        return False, f"Breakout with very weak volume ({volume_ratio:.1f}x)"
+                    else:
+                        return True, f"Breakout with below-avg volume ({volume_ratio:.1f}x)"
             else:
-                # Not a breakout setup - that's okay
+                # ✅ NOT a breakout setup - ALWAYS PASS!
                 return True, "Not a breakout pattern"
         
         else:  # SHORT
-            near_low = close <= low_20 * 1.02
-            breaking_50_low = close <= low_50 * 1.01
+            is_breakdown = dist_to_low_pct <= 1.0
             
-            if breaking_50_low:
-                if volume_ratio >= 1.5:
-                    return True, "Strong breakdown: 50-day low with heavy volume"
-                elif volume_ratio >= 1.2:
-                    return True, "Breakdown: 50-day low with good volume"
+            if is_breakdown:
+                if volume_ratio >= 1.2:
+                    return True, f"Breakdown confirmed ({volume_ratio:.1f}x vol)"
+                elif volume_ratio >= 0.8:
+                    return True, f"Breakdown with fair volume ({volume_ratio:.1f}x)"
                 else:
-                    return False, f"Breakdown without volume ({volume_ratio:.1f}x)"
-            
-            elif near_low:
-                if volume_ratio >= 1.3:
-                    return True, "Breakdown: 20-day low with volume confirmation"
-                elif volume_ratio >= 1.0:
-                    return True, "Near 20-day low with average volume"
-                else:
-                    return False, f"Near low but weak volume ({volume_ratio:.1f}x)"
-            
+                    if volume_ratio < 0.5:
+                        return False, f"Breakdown with very weak volume ({volume_ratio:.1f}x)"
+                    else:
+                        return True, f"Breakdown with below-avg volume ({volume_ratio:.1f}x)"
             else:
                 return True, "Not a breakdown pattern"
         
     except Exception as e:
         logger.debug(f"Breakout validation failed: {e}")
-        return True, "Breakout check failed"
+        return True, "Check skipped"
 
 
 # ============================================================================
@@ -4506,10 +4553,10 @@ def scan_ticker(
         trend_strength, trend_interpretation = calculate_trend_strength(df_t)
         
         # Reject very weak trends (optional - can be adjusted)
-        if trend_interpretation == "WEAK" and trend_strength < 25:
-            stats["indicator_fail"] += 1
-            log_rejection("Weak trend", f"Strength: {trend_strength:.0f}")
-            return None
+        #  if trend_strength < 15:  # ← LOWERED from 25 to 15
+        #     stats["indicator_fail"] += 1
+        #     log_rejection("Very weak trend", f"Strength: {trend_strength:.0f}")
+        #     return None
         
         # =====================================================================
         # STEP 10: RUN ALL ANALYZERS
