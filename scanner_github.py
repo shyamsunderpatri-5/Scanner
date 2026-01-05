@@ -763,6 +763,9 @@ USE_WALK_FORWARD = True         # ✅ ENABLED (3 periods validation)
 USE_MONTE_CARLO = False         # ✅ DISABLED (saves time in BALANCED mode)
 USE_REALTIME_DATA = True  # Use live data during market hours
 
+USE_TREND_STRENGTH_FILTER = False   # Set to False to disable
+USE_BREAKOUT_CONFIRMATION = False   # Set to False to disable
+
 # Backtesting
 BACKTEST_LOOKBACK_DAYS = 300    # ✅ Changed from 252 to 300
 MIN_BACKTEST_TRADES = 12        # ✅ Raised from 10 to 12
@@ -4552,11 +4555,10 @@ def scan_ticker(
         # =====================================================================
         trend_strength, trend_interpretation = calculate_trend_strength(df_t)
         
-        # Reject very weak trends (optional - can be adjusted)
-        #  if trend_strength < 15:  # ← LOWERED from 25 to 15
-        #     stats["indicator_fail"] += 1
-        #     log_rejection("Very weak trend", f"Strength: {trend_strength:.0f}")
-        #     return None
+        if USE_TREND_STRENGTH_FILTER and trend_strength < 15:
+            stats["indicator_fail"] += 1
+            log_rejection("Weak trend", f"Strength: {trend_strength:.0f}")
+            return None
         
         # =====================================================================
         # STEP 10: RUN ALL ANALYZERS
@@ -4671,12 +4673,14 @@ def scan_ticker(
         # =====================================================================
         # STEP 18: BREAKOUT CONFIRMATION CHECK (NEW IMPROVEMENT #2)
         # =====================================================================
-        breakout_valid, breakout_reason = is_breakout_valid(df_t, side, price)
-        
-        if not breakout_valid:
-            stats["indicator_fail"] += 1
-            log_rejection("Breakout invalid", breakout_reason)
-            return None
+        if USE_BREAKOUT_CONFIRMATION:
+            breakout_valid, breakout_reason = is_breakout_valid(df_t, side, price)
+            if not breakout_valid:
+                stats["indicator_fail"] += 1
+                log_rejection("Breakout invalid", breakout_reason)
+                return None
+        else:
+            breakout_reason = "Check disabled"
         
         # Add breakout reason to signal reasons if it's a breakout
         if "breakout" in breakout_reason.lower() or "breakdown" in breakout_reason.lower():
