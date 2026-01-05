@@ -306,27 +306,91 @@ def update_google_sheet(signals_data):
             logger.error(f"Error checking/creating headers: {e}")
             return False
         
-        # ⭐⭐⭐ MODIFIED: Select TOP 2 by Backtest Win Rate ⭐⭐⭐
+        # ⭐⭐⭐ FIXED: Check for backtest data in both formats ⭐⭐⭐
         
-        # Filter signals that have backtest validation
-        backtest_validated = [
-            s for s in signals_data 
-            if s.get('backtest_validated') and s.get('backtest')
-        ]
+        def has_backtest_data(signal):
+            """Check if signal has backtest data (handles both formats)"""
+            # Format 1: CSV columns (BT_WR, BT_PF)
+            if 'BT_WR' in signal and signal['BT_WR'] not in [None, '', 'N/A', 'nan']:
+                try:
+                    float(signal['BT_WR'])
+                    return True
+                except:
+                    pass
+            
+            # Format 2: Nested dict (backtest.win_rate)
+            if signal.get('backtest_validated') and signal.get('backtest'):
+                return True
+            
+            return False
+        
+        def get_backtest_win_rate(signal):
+            """Get win rate from either format"""
+            # Try CSV column first
+            if 'BT_WR' in signal and signal['BT_WR'] not in [None, '', 'N/A', 'nan']:
+                try:
+                    wr = float(signal['BT_WR'])
+                    # Handle percentage format (e.g., "79.2%" stored as 79.2 or 0.792)
+                    return wr if wr > 1 else wr * 100
+                except:
+                    pass
+            
+            # Try nested dict
+            bt = signal.get('backtest', {})
+            if bt:
+                return bt.get('win_rate', 0)
+            
+            return 0
+        
+        def get_backtest_profit_factor(signal):
+            """Get profit factor from either format"""
+            # Try CSV column first
+            if 'BT_PF' in signal and signal['BT_PF'] not in [None, '', 'N/A', 'nan']:
+                try:
+                    return float(signal['BT_PF'].replace('x', '')) if isinstance(signal['BT_PF'], str) else float(signal['BT_PF'])
+                except:
+                    pass
+            
+            # Try nested dict
+            bt = signal.get('backtest', {})
+            if bt:
+                return bt.get('profit_factor', 0)
+            
+            return 0
+        
+        def get_confidence(signal):
+            """Get confidence from various possible column names"""
+            # Try different column name variations
+            for key in ['CONF', 'Confidence', 'confidence', 'Conf']:
+                if key in signal and signal[key] not in [None, '', 'N/A', 'nan']:
+                    try:
+                        conf = signal[key]
+                        # Remove % if present
+                        if isinstance(conf, str):
+                            conf = float(conf.replace('%', ''))
+                        else:
+                            conf = float(conf)
+                        # Handle decimal format (0.98 vs 98)
+                        return conf if conf > 1 else conf * 100
+                    except:
+                        pass
+            return 0
+        
+        # Filter signals with backtest data
+        backtest_validated = [s for s in signals_data if has_backtest_data(s)]
         
         if not backtest_validated:
-            # Fallback: use top 2 by confidence if no backtest data
+            # Fallback: use top 2 by confidence
             logger.warning("⚠️  No backtest data found, falling back to top 2 by confidence")
-            sorted_signals = sorted(signals_data, key=lambda x: x.get('confidence', 0), reverse=True)
+            sorted_signals = sorted(signals_data, key=lambda x: get_confidence(x), reverse=True)
             top_2_signals = sorted_signals[:2]
         else:
-            # Sort by: Win Rate (primary) > Profit Factor (secondary) > Confidence (tertiary)
+            # Sort by: Win Rate > Profit Factor > Confidence
             def get_sort_key(signal):
-                bt = signal.get('backtest', {})
                 return (
-                    bt.get('win_rate', 0),           # PRIMARY: Win Rate
-                    bt.get('profit_factor', 0),      # SECONDARY: Profit Factor
-                    signal.get('confidence', 0)      # TERTIARY: Confidence
+                    get_backtest_win_rate(signal),           # PRIMARY
+                    get_backtest_profit_factor(signal),      # SECONDARY
+                    get_confidence(signal)                    # TERTIARY
                 )
             
             sorted_signals = sorted(backtest_validated, key=get_sort_key, reverse=True)
@@ -340,17 +404,18 @@ def update_google_sheet(signals_data):
             logger.info("🏆 TOP 2 SELECTED FOR GOOGLE SHEETS:")
             
             for i, sig in enumerate(top_2_signals, 1):
-                bt = sig.get('backtest', {})
-                ticker = sig.get('ticker', 'N/A')
-                side = sig.get('side', 'N/A')
-                win_rate = bt.get('win_rate', 0)
-                profit_factor = bt.get('profit_factor', 0)
-                confidence = sig.get('confidence', 0)
+                ticker = sig.get('TICKER', sig.get('Ticker', 'N/A'))
+                side = sig.get('SIDE', sig.get('Side', sig.get('Signal', 'N/A')))
+                win_rate = get_backtest_win_rate(sig)
+                profit_factor = get_backtest_profit_factor(sig)
+                confidence = get_confidence(sig)
                 
                 logger.info(f"  #{i}: {ticker} ({side}) - "
                           f"Win Rate: {win_rate:.1f}%, "
                           f"Profit Factor: {profit_factor:.1f}x, "
                           f"Confidence: {confidence:.1f}%")
+        else:
+            logger.warning("Using top 2 by confidence (no backtest data available)")
         
         # Format rows for Google Sheet
         rows_to_add = []
