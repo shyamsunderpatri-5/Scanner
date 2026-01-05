@@ -763,8 +763,8 @@ USE_WALK_FORWARD = True         # ✅ ENABLED (3 periods validation)
 USE_MONTE_CARLO = False         # ✅ DISABLED (saves time in BALANCED mode)
 USE_REALTIME_DATA = True  # Use live data during market hours
 
-USE_TREND_STRENGTH_FILTER = False   # Set to False to disable
-USE_BREAKOUT_CONFIRMATION = False   # Set to False to disable
+USE_TREND_STRENGTH_FILTER = True   # Set to False to disable
+USE_BREAKOUT_CONFIRMATION = True   # Set to False to disable
 
 # Backtesting
 BACKTEST_LOOKBACK_DAYS = 300    # ✅ Changed from 252 to 300
