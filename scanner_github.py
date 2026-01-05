@@ -306,22 +306,60 @@ def update_google_sheet(signals_data):
             logger.error(f"Error checking/creating headers: {e}")
             return False
         
-        # Format all signals into rows
-        sorted_signals = sorted(signals_data, key=lambda x: x.get('Confidence', 0), reverse=True)
-        top_5_signals = sorted_signals[:5]  # Take only top 5
-
-        logger.info(f"📊 Total signals: {len(signals_data)}, selecting top 5 by confidence")
+        # ⭐⭐⭐ MODIFIED: Select TOP 2 by Backtest Win Rate ⭐⭐⭐
         
+        # Filter signals that have backtest validation
+        backtest_validated = [
+            s for s in signals_data 
+            if s.get('backtest_validated') and s.get('backtest')
+        ]
+        
+        if not backtest_validated:
+            # Fallback: use top 2 by confidence if no backtest data
+            logger.warning("⚠️  No backtest data found, falling back to top 2 by confidence")
+            sorted_signals = sorted(signals_data, key=lambda x: x.get('confidence', 0), reverse=True)
+            top_2_signals = sorted_signals[:2]
+        else:
+            # Sort by: Win Rate (primary) > Profit Factor (secondary) > Confidence (tertiary)
+            def get_sort_key(signal):
+                bt = signal.get('backtest', {})
+                return (
+                    bt.get('win_rate', 0),           # PRIMARY: Win Rate
+                    bt.get('profit_factor', 0),      # SECONDARY: Profit Factor
+                    signal.get('confidence', 0)      # TERTIARY: Confidence
+                )
+            
+            sorted_signals = sorted(backtest_validated, key=get_sort_key, reverse=True)
+            top_2_signals = sorted_signals[:2]
+        
+        # Detailed logging
+        logger.info(f"📊 Total signals: {len(signals_data)}, selecting TOP 2 by Backtest Win Rate")
+        
+        if backtest_validated:
+            logger.info(f"✓ Found {len(backtest_validated)} signals with backtest validation")
+            logger.info("🏆 TOP 2 SELECTED FOR GOOGLE SHEETS:")
+            
+            for i, sig in enumerate(top_2_signals, 1):
+                bt = sig.get('backtest', {})
+                ticker = sig.get('ticker', 'N/A')
+                side = sig.get('side', 'N/A')
+                win_rate = bt.get('win_rate', 0)
+                profit_factor = bt.get('profit_factor', 0)
+                confidence = sig.get('confidence', 0)
+                
+                logger.info(f"  #{i}: {ticker} ({side}) - "
+                          f"Win Rate: {win_rate:.1f}%, "
+                          f"Profit Factor: {profit_factor:.1f}x, "
+                          f"Confidence: {confidence:.1f}%")
+        
+        # Format rows for Google Sheet
         rows_to_add = []
-        for signal in top_5_signals:
+        for signal in top_2_signals:
             row = format_sheet_row(signal, tomorrow)
             if row:
                 rows_to_add.append(row)
 
-        logger.info(f"📝 Formatted {len(rows_to_add)} rows for Google Sheet (Top 5 by Confidence)")
-        
-        
-        logger.info(f"📝 Formatted {len(rows_to_add)} rows for Google Sheet")
+        logger.info(f"📝 Formatted {len(rows_to_add)} rows for Google Sheet (TOP 2 by Win Rate)")
         
         # Find the next empty row
         result = service.spreadsheets().values().get(
