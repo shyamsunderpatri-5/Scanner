@@ -872,47 +872,6 @@ class MonteCarloResult:
 
 class TradeRule:
     """Enhanced trade rule with multi-entry support - AGGRESSIVE QTY FIX"""
-    def calculate_dynamic_targets(self, confidence: float):
-        """Adjust targets based on setup quality - FIXED VERSION"""
-        
-        # ✅ FIXED: Variable R:R based on confidence
-        if confidence >= 85:
-            # Very high confidence - aggressive targets
-            multiplier_t1 = 2.5
-            multiplier_t2 = 5.0
-        elif confidence >= 75:
-            # High confidence - good targets
-            multiplier_t1 = 2.2
-            multiplier_t2 = 4.5
-        elif confidence >= 65:
-            # Good confidence - standard targets
-            multiplier_t1 = 2.0
-            multiplier_t2 = 4.0
-        elif confidence >= 55:
-            # Medium confidence - conservative targets
-            multiplier_t1 = 1.8
-            multiplier_t2 = 3.5
-        else:
-            # Low confidence - very conservative
-            multiplier_t1 = 1.5
-            multiplier_t2 = 3.0
-        
-        if self.side == "LONG":
-            self.target_1 = round(self.entry_price + (self.atr * multiplier_t1), 2)
-            self.target_2 = round(self.entry_price + (self.atr * multiplier_t2), 2)
-        else:
-            self.target_1 = round(self.entry_price - (self.atr * multiplier_t1), 2)
-            self.target_2 = round(self.entry_price - (self.atr * multiplier_t2), 2)
-        
-        # Recalculate R:R
-        risk_per_share = abs(self.entry_price - self.stop_loss)
-        reward_per_share = abs(self.target_1 - self.entry_price)
-        
-        if risk_per_share > 0:
-            self.risk_reward_ratio = reward_per_share / risk_per_share
-        else:
-            self.risk_reward_ratio = 0
-
 
     def __init__(self, ticker: str, side: str, current_price: float, atr: float):
         self.ticker = ticker
@@ -923,14 +882,25 @@ class TradeRule:
         self.risk_amount = ACCOUNT_CAPITAL * RISK_PER_TRADE
         
         # ✅ FIX: Use 2.0x ATR multiplier for better default R:R
+        # ✅ IMPROVED - Dynamic stop based on volatility:
+        # Calculate volatility-adjusted stop multiplier
+        atr_pct = self.atr / current_price
+        
+        if atr_pct > 0.04:  # High volatility (>4%)
+            stop_multiplier = 2.0  # Wider stop
+        elif atr_pct > 0.025:  # Medium volatility
+            stop_multiplier = 1.5  # Normal stop
+        else:  # Low volatility (<2.5%)
+            stop_multiplier = 1.2  # Tighter stop
+        
         if side == "LONG":
-            self.stop_loss = round(current_price - (self.atr * 1.5), 2)
-            self.target_1 = round(current_price + (self.atr * 2.5), 2)  # ✅ Changed from 2.0 to 2.5
-            self.target_2 = round(current_price + (self.atr * 5.0), 2)  # ✅ Changed from 4.0 to 5.0
+            self.stop_loss = round(current_price - (self.atr * stop_multiplier), 2)
+            self.target_1 = round(current_price + (self.atr * stop_multiplier * 1.8), 2)
+            self.target_2 = round(current_price + (self.atr * stop_multiplier * 3.5), 2)
         else:
-            self.stop_loss = round(current_price + (self.atr * 1.5), 2)
-            self.target_1 = round(current_price - (self.atr * 2.5), 2)  # ✅ Changed from 2.0 to 2.5
-            self.target_2 = round(current_price - (self.atr * 5.0), 2)  # ✅ Changed from 4.0 to 5.0
+            self.stop_loss = round(current_price + (self.atr * stop_multiplier), 2)
+            self.target_1 = round(current_price - (self.atr * stop_multiplier * 1.8), 2)
+            self.target_2 = round(current_price - (self.atr * stop_multiplier * 3.5), 2)
         
         # ✅ Calculate quantity based on actual stop distance
         risk_per_share = abs(self.entry_price - self.stop_loss)
@@ -1885,38 +1855,66 @@ class CandlestickPatternDetector:
 # MULTI-TIMEFRAME ANALYZER
 # ============================================================================
 
+# ✅ CORRECTED CODE - Use cached data:
 class MultiTimeframeAnalyzer:
-    """Analyze trends across multiple timeframes"""
+    """Analyze trends across multiple timeframes - OPTIMIZED"""
     
     @staticmethod
-    def get_trend(ticker: str) -> Optional[str]:
-        """Get multi-timeframe trend alignment"""
+    def get_trend_from_cache(df: pd.DataFrame) -> Optional[str]:
+        """Get multi-timeframe trend using cached data (NO re-download!)"""
         try:
-            daily = yf.download(ticker, period="3mo", interval="1d", progress=False)
-            weekly = yf.download(ticker, period="6mo", interval="1wk", progress=False)
-            
-            if daily.empty or weekly.empty:
+            if df is None or len(df) < 50:
                 return None
             
-            daily_ema20 = daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
-            daily_ema50 = daily['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
-            daily_close = daily['Close'].iloc[-1]
+            # Use daily data we already have
+            daily_close = df['Close']
             
-            daily_trend = "UP" if daily_close > daily_ema20 > daily_ema50 else "DOWN"
+            # Calculate EMAs on daily
+            daily_ema20 = daily_close.ewm(span=20, adjust=False).mean().iloc[-1]
+            daily_ema50 = daily_close.ewm(span=50, adjust=False).mean().iloc[-1]
+            daily_ema200 = daily_close.ewm(span=200, adjust=False).mean().iloc[-1] if len(df) >= 200 else daily_ema50
+            current_price = daily_close.iloc[-1]
             
-            weekly_ema10 = weekly['Close'].ewm(span=10, adjust=False).mean().iloc[-1]
-            weekly_ema20 = weekly['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
-            weekly_close = weekly['Close'].iloc[-1]
-            
-            weekly_trend = "UP" if weekly_close > weekly_ema10 > weekly_ema20 else "DOWN"
-            
-            if daily_trend == weekly_trend:
-                return daily_trend
+            # Daily trend
+            if current_price > daily_ema20 > daily_ema50:
+                daily_trend = "UP"
+            elif current_price < daily_ema20 < daily_ema50:
+                daily_trend = "DOWN"
             else:
-                return "MIXED"
+                daily_trend = "MIXED"
+            
+            # Simulate weekly by resampling (if enough data)
+            if len(df) >= 30:
+                weekly = df.resample('W').agg({
+                    'Open': 'first',
+                    'High': 'max',
+                    'Low': 'min',
+                    'Close': 'last',
+                    'Volume': 'sum'
+                }).dropna()
                 
-        except Exception:
+                if len(weekly) >= 10:
+                    weekly_ema10 = weekly['Close'].ewm(span=10, adjust=False).mean().iloc[-1]
+                    weekly_close = weekly['Close'].iloc[-1]
+                    
+                    weekly_trend = "UP" if weekly_close > weekly_ema10 else "DOWN"
+                    
+                    # Combined trend
+                    if daily_trend == weekly_trend:
+                        return daily_trend
+                    else:
+                        return "MIXED"
+            
+            return daily_trend
+            
+        except Exception as e:
+            logger.debug(f"MTF analysis failed: {e}")
             return None
+    
+    # Keep old method for backward compatibility but mark deprecated
+    def get_trend(self, ticker: str) -> Optional[str]:
+        """DEPRECATED - Use get_trend_from_cache instead"""
+        return None  # Return None to skip slow download
 
 # ============================================================================
 # FIBONACCI LEVEL DETECTOR
@@ -2024,35 +2022,242 @@ class VIXSentimentAnalyzer:
         except Exception:
             return None
 
+
+# ✅ NEW CLASS - Add this:
+
+class MarketRegimeFilter:
+    """
+    Detect overall market regime to avoid trading in unfavorable conditions
+    - BULLISH: Favor LONG signals
+    - BEARISH: Favor SHORT signals  
+    - RANGING: Reduce position sizes
+    - VOLATILE: Skip trading
+    """
+    
+    _cache = {}
+    _cache_time = None
+    _cache_duration = 1800  # 30 minutes
+    
+    @classmethod
+    def get_market_regime(cls) -> Dict:
+        """Get current market regime"""
+        import time as time_module
+        
+        # Return cached result if fresh
+        if cls._cache and cls._cache_time and (time_module.time() - cls._cache_time) < cls._cache_duration:
+            return cls._cache
+        
+        try:
+            # Download Nifty 50 data
+            nifty = yf.download("^NSEI", period="3mo", interval="1d", progress=False)
+            
+            if nifty.empty or len(nifty) < 50:
+                return {"regime": "UNKNOWN", "score": 0, "bias": "NEUTRAL"}
+            
+            close = nifty['Close']
+            
+            # Calculate indicators
+            ema20 = close.ewm(span=20, adjust=False).mean()
+            ema50 = close.ewm(span=50, adjust=False).mean()
+            ema200 = close.ewm(span=200, adjust=False).mean()
+            
+            current_price = float(close.iloc[-1])
+            current_ema20 = float(ema20.iloc[-1])
+            current_ema50 = float(ema50.iloc[-1])
+            current_ema200 = float(ema200.iloc[-1])
+            
+            # Calculate ADX for trend strength
+            high = nifty['High']
+            low = nifty['Low']
+            
+            plus_dm = high.diff()
+            minus_dm = -low.diff()
+            plus_dm[plus_dm < 0] = 0
+            minus_dm[minus_dm < 0] = 0
+            
+            tr = pd.concat([
+                high - low,
+                abs(high - close.shift()),
+                abs(low - close.shift())
+            ], axis=1).max(axis=1)
+            
+            atr14 = tr.rolling(14).mean()
+            plus_di = 100 * (plus_dm.rolling(14).mean() / atr14)
+            minus_di = 100 * (minus_dm.rolling(14).mean() / atr14)
+            dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+            adx = float(dx.rolling(14).mean().iloc[-1])
+            
+            # Calculate 20-day volatility
+            returns = close.pct_change()
+            volatility = float(returns.tail(20).std() * np.sqrt(252) * 100)
+            
+            # Determine regime
+            score = 0
+            
+            if current_price > current_ema20 > current_ema50 > current_ema200:
+                regime = "STRONG_BULLISH"
+                score = 10
+                bias = "LONG"
+            elif current_price > current_ema20 > current_ema50:
+                regime = "BULLISH"
+                score = 7
+                bias = "LONG"
+            elif current_price < current_ema20 < current_ema50 < current_ema200:
+                regime = "STRONG_BEARISH"
+                score = -10
+                bias = "SHORT"
+            elif current_price < current_ema20 < current_ema50:
+                regime = "BEARISH"
+                score = -7
+                bias = "SHORT"
+            elif adx < 20:
+                regime = "RANGING"
+                score = 0
+                bias = "NEUTRAL"
+            else:
+                regime = "MIXED"
+                score = 0
+                bias = "NEUTRAL"
+            
+            # Adjust for high volatility
+            if volatility > 25:
+                regime = "HIGH_VOLATILITY"
+                bias = "CAUTION"
+                score = score * 0.5
+            
+            result = {
+                "regime": regime,
+                "score": score,
+                "bias": bias,
+                "nifty_price": current_price,
+                "adx": adx,
+                "volatility": volatility,
+                "ema20": current_ema20,
+                "ema50": current_ema50,
+                "ema200": current_ema200
+            }
+            
+            cls._cache = result
+            cls._cache_time = time_module.time()
+            
+            return result
+            
+        except Exception as e:
+            logger.debug(f"Market regime check failed: {e}")
+            return {"regime": "UNKNOWN", "score": 0, "bias": "NEUTRAL"}
+
+# ✅ NEW CLASS - Add this:
+
+class RelativeStrengthCalculator:
+    """Calculate stock's relative strength vs Nifty 50"""
+    
+    _nifty_data = None
+    _nifty_returns = None
+    
+    @classmethod
+    def _load_nifty(cls):
+        """Load Nifty data once"""
+        if cls._nifty_data is None:
+            try:
+                cls._nifty_data = yf.download("^NSEI", period="3mo", interval="1d", progress=False)
+                if not cls._nifty_data.empty:
+                    cls._nifty_returns = cls._nifty_data['Close'].pct_change()
+            except:
+                pass
+    
+    @classmethod
+    def calculate_rs(cls, stock_df: pd.DataFrame, lookback: int = 20) -> Tuple[float, str]:
+        """
+        Calculate Relative Strength vs Nifty
+        Returns: (RS value, interpretation)
+        """
+        try:
+            cls._load_nifty()
+            
+            if cls._nifty_returns is None or len(stock_df) < lookback:
+                return 0, "UNKNOWN"
+            
+            # Stock returns
+            stock_returns = stock_df['Close'].pct_change().tail(lookback)
+            stock_cumulative = (1 + stock_returns).prod() - 1
+            
+            # Nifty returns (same period)
+            nifty_returns = cls._nifty_returns.tail(lookback)
+            nifty_cumulative = (1 + nifty_returns).prod() - 1
+            
+            # RS = Stock performance / Nifty performance
+            if abs(nifty_cumulative) > 0.001:
+                rs = (stock_cumulative / nifty_cumulative) * 100
+            else:
+                rs = 100 if stock_cumulative > 0 else -100
+            
+            # Interpretation
+            if rs > 150:
+                interpretation = "VERY_STRONG"
+            elif rs > 110:
+                interpretation = "STRONG"
+            elif rs > 90:
+                interpretation = "NEUTRAL"
+            elif rs > 50:
+                interpretation = "WEAK"
+            else:
+                interpretation = "VERY_WEAK"
+            
+            return round(rs, 1), interpretation
+            
+        except Exception as e:
+            logger.debug(f"RS calculation failed: {e}")
+            return 0, "UNKNOWN"
+        
+
 # ============================================================================
 # SECTOR ROTATION ANALYZER
 # ============================================================================
 
 class SectorRotationAnalyzer:
-    """Analyze sector strength"""
+    """Analyze sector strength - FIXED VERSION"""
     
     def __init__(self):
         self.sector_etfs = {
-            'NIFTY_BANK': '^NSEBANK',
-            'NIFTY_IT': 'NIFTYBEES.NS',
-            'NIFTY_AUTO': '^CNXAUTO',
-            'NIFTY_PHARMA': '^CNXPHARMA',
+            # Use Nifty sector indices that actually work
+            'FINANCIALS': 'NIFTY_FIN_SERVICE.NS',
+            'BANKING': 'BANKNIFTY.NS',
+            'IT': 'NIFTYIT.NS',
+            'PHARMA': 'NIFTYPHARMA.NS',
+            'AUTO': 'NIFTYAUTO.NS',
+            'FMCG': 'NIFTYFMCG.NS',
+            'METAL': 'NIFTYMETAL.NS',
+            'REALTY': 'NIFTYREALTY.NS',
+            'ENERGY': 'NIFTYENERGY.NS',
+            'INFRA': 'NIFTYINFRA.NS',
         }
         self.sector_strength = {}
+        self._last_update = None
+        self._cache_duration = 3600  # 1 hour cache
     
     def update_sector_strength(self):
-        """Update relative strength of sectors"""
+        """Update relative strength of sectors - WITH CACHING"""
+        import time as time_module
+        
+        # Use cache if fresh
+        if self._last_update and (time_module.time() - self._last_update) < self._cache_duration:
+            return
+        
         try:
             for sector, ticker in self.sector_etfs.items():
                 try:
-                    data = yf.download(ticker, period="3mo", interval="1d", progress=False)
-                    if not data.empty:
+                    data = yf.download(ticker, period="1mo", interval="1d", progress=False)
+                    if not data.empty and len(data) >= 20:
                         returns = (data['Close'].iloc[-1] / data['Close'].iloc[-20] - 1) * 100
-                        self.sector_strength[sector] = returns
-                except:
+                        self.sector_strength[sector] = float(returns.iloc[0] if hasattr(returns, 'iloc') else returns)
+                except Exception as e:
+                    logger.debug(f"Sector {sector} fetch failed: {e}")
                     continue
-        except Exception:
-            pass
+            
+            self._last_update = time_module.time()
+            
+        except Exception as e:
+            logger.debug(f"Sector rotation update failed: {e}")
     
     def get_sector_strength(self, sector: str) -> Optional[Tuple[float, str]]:
         """Get sector relative strength"""
@@ -2884,15 +3089,31 @@ class AdvancedBacktester:
 # FUNDAMENTALS FETCHER
 # ============================================================================
 
+# ✅ CORRECTED - With caching:
+
+_fundamentals_cache = {}
+
 def get_fundamentals(ticker: str) -> Tuple[Optional[str], Optional[float]]:
-    """Get sector and P/E ratio"""
+    """Get sector and P/E ratio - WITH CACHING"""
+    global _fundamentals_cache
+    
+    # Check cache first
+    if ticker in _fundamentals_cache:
+        return _fundamentals_cache[ticker]
+    
     try:
         t = yf.Ticker(ticker)
         info = t.info or {}
         sector = info.get('sector')
         pe = info.get('trailingPE')
+        
+        # Cache the result
+        _fundamentals_cache[ticker] = (sector, pe)
+        
         return sector, pe
+        
     except Exception:
+        _fundamentals_cache[ticker] = (None, None)
         return None, None
 
 # ============================================================================
@@ -3120,7 +3341,7 @@ def score_signal(
     """Comprehensive scoring with REALISTIC confidence - STEEPER SIGMOID"""
     
     w = SCORING_WEIGHTS
-    raw_score = 0.0  # ✅ Start at 0
+    raw_score = 0.0
     reasons = []
     
     # ═══════════════════════════════════════════════════════════════════════
@@ -3133,13 +3354,13 @@ def score_signal(
         elif ind["price"] > ind["ema20"]:
             raw_score += 7
         else:
-            raw_score -= 12  # ✅ STRONG PENALTY for against trend
+            raw_score -= 12
         
         if ind["price"] > ind["ema200"]:
             raw_score += w["ema_200"]
             reasons.append("Above 200 EMA")
         else:
-            raw_score -= 3  # ✅ PENALTY
+            raw_score -= 3
     else:  # SHORT
         if ind["price"] < ind["ema20"] < ind["ema50"]:
             raw_score += 15
@@ -3147,7 +3368,7 @@ def score_signal(
         elif ind["price"] < ind["ema20"]:
             raw_score += 7
         else:
-            raw_score -= 12  # ✅ STRONG PENALTY
+            raw_score -= 12
         
         if ind["price"] < ind["ema200"]:
             raw_score += w["ema_200"]
@@ -3165,7 +3386,7 @@ def score_signal(
         raw_score += w["ema_slope"]
         reasons.append("EMA falling")
     else:
-        raw_score -= 4  # ✅ PENALTY for wrong slope
+        raw_score -= 4
     
     # ═══════════════════════════════════════════════════════════════════════
     # RSI (max ±10 points)
@@ -3176,9 +3397,9 @@ def score_signal(
         raw_score += w["rsi"]
         reasons.append(f"RSI {ind['rsi']:.1f} optimal")
     elif ind["rsi"] < 20 or ind["rsi"] > 80:
-        raw_score -= 8  # ✅ STRONG PENALTY for extreme RSI
+        raw_score -= 8
     elif ind["rsi"] < 30 or ind["rsi"] > 70:
-        raw_score -= 5  # ✅ MODERATE PENALTY
+        raw_score -= 5
     
     # ═══════════════════════════════════════════════════════════════════════
     # MACD (max ±10 points)
@@ -3190,18 +3411,18 @@ def score_signal(
         raw_score += w["macd"]
         reasons.append("MACD bearish")
     else:
-        raw_score -= 6  # ✅ PENALTY for wrong MACD direction
+        raw_score -= 6
     
     # ═══════════════════════════════════════════════════════════════════════
     # VOLUME (max ±6 points)
     # ═══════════════════════════════════════════════════════════════════════
     if ind["volume_ratio"] >= 1.5:
         raw_score += w["volume_ratio"]
-        reasons.append(f"Strong volume")
+        reasons.append("Strong volume")
     elif ind["volume_ratio"] >= 1.0:
-        raw_score += w["volume_ratio"] * 0.5  # Partial credit
+        raw_score += w["volume_ratio"] * 0.5
     elif ind["volume_ratio"] < 0.7:
-        raw_score -= w["volume_ratio"]  # PENALTY for weak volume
+        raw_score -= w["volume_ratio"]
     
     # ═══════════════════════════════════════════════════════════════════════
     # OBV (max ±4 points)
@@ -3211,7 +3432,7 @@ def score_signal(
     elif side == "SHORT" and ind["obv_slope"] < 0:
         raw_score += w["obv"]
     else:
-        raw_score -= 3  # ✅ PENALTY
+        raw_score -= 3
     
     # ═══════════════════════════════════════════════════════════════════════
     # SUPPORT/RESISTANCE (max ±7 points)
@@ -3225,9 +3446,9 @@ def score_signal(
         raw_score += w["sr_resistance"]
         reasons.append("At resistance")
     elif sr_bias == 'AT_RESISTANCE' and side == "LONG":
-        raw_score -= 5  # ✅ PENALTY - buying at resistance
+        raw_score -= 5
     elif sr_bias == 'AT_SUPPORT' and side == "SHORT":
-        raw_score -= 5  # ✅ PENALTY - shorting at support
+        raw_score -= 5
     
     # ═══════════════════════════════════════════════════════════════════════
     # CANDLESTICK PATTERNS (max ±6 points)
@@ -3238,20 +3459,19 @@ def score_signal(
         raw_score += w["candle"] * min(1, abs(candle_score) / 8)
         reasons.append(candle.get('description', 'Pattern'))
     elif abs(candle_score) > 5:
-        # ✅ PENALTY if candle contradicts our direction
         raw_score -= 4
     
     # ═══════════════════════════════════════════════════════════════════════
-    # MULTI-TIMEFRAME (max ±9 points) - STRONG WEIGHT
+    # MULTI-TIMEFRAME (max ±9 points)
     # ═══════════════════════════════════════════════════════════════════════
     if mtf_trend:
         if (side == "LONG" and mtf_trend == "UP") or (side == "SHORT" and mtf_trend == "DOWN"):
             raw_score += w["mtf_trend"]
             reasons.append(f"MTF {mtf_trend}")
         elif mtf_trend == "MIXED":
-            raw_score -= w["mtf_penalty"]  # ✅ STRONG PENALTY
+            raw_score -= w["mtf_penalty"]
         else:
-            raw_score -= 8  # ✅ VERY STRONG PENALTY for opposing MTF
+            raw_score -= 8
     
     # ═══════════════════════════════════════════════════════════════════════
     # VIX SENTIMENT (max ±6 points)
@@ -3263,7 +3483,7 @@ def score_signal(
         elif side == "SHORT" and vix_score < 0:
             raw_score += w["vix_sentiment"]
         elif abs(vix_score) > 5:
-            raw_score -= 3  # ✅ PENALTY if VIX opposes direction
+            raw_score -= 3
     
     # ═══════════════════════════════════════════════════════════════════════
     # FIBONACCI (max ±8 points)
@@ -3282,7 +3502,7 @@ def score_signal(
             if vol_score > 5:
                 reasons.append(volume_analysis.get('signal', ''))
         elif vol_score < -5:
-            raw_score -= 5  # ✅ PENALTY for negative volume signal
+            raw_score -= 5
     
     # ═══════════════════════════════════════════════════════════════════════
     # VSA (max ±7 points)
@@ -3293,7 +3513,7 @@ def score_signal(
             raw_score += w["vsa_confirmation"] * min(1, abs(vsa_score) / 8)
             reasons.append(vsa_analysis.get('signal', ''))
         elif abs(vsa_score) > 5:
-            raw_score -= 4  # ✅ PENALTY for opposing VSA
+            raw_score -= 4
     
     # ═══════════════════════════════════════════════════════════════════════
     # MOMENTUM (max ±8 points)
@@ -3305,7 +3525,7 @@ def score_signal(
             if mom_score > 5:
                 reasons.append(momentum_analysis.get('signal', ''))
         elif mom_score < -5:
-            raw_score -= 5  # ✅ PENALTY
+            raw_score -= 5
     
     # ═══════════════════════════════════════════════════════════════════════
     # VCP PATTERN (max ±9 points)
@@ -3324,7 +3544,7 @@ def score_signal(
         if (side == "LONG" and gap_score > 0) or (side == "SHORT" and gap_score < 0):
             raw_score += w["gap_detection"] * min(1, abs(gap_score) / 8)
         elif abs(gap_score) > 5:
-            raw_score -= 3  # ✅ PENALTY
+            raw_score -= 3
     
     # ═══════════════════════════════════════════════════════════════════════
     # SUPERTREND (max ±8 points)
@@ -3335,7 +3555,7 @@ def score_signal(
             raw_score += w["supertrend"]
             reasons.append(f"Supertrend {st_direction}")
         elif st_direction:
-            raw_score -= 6  # ✅ STRONG PENALTY for opposing Supertrend
+            raw_score -= 6
     
     # ═══════════════════════════════════════════════════════════════════════
     # SECTOR STRENGTH (max ±5 points)
@@ -3346,34 +3566,54 @@ def score_signal(
             raw_score += 5
             reasons.append("Strong sector")
         elif rs_label == "WEAK":
-            raw_score -= 4  # ✅ PENALTY
+            raw_score -= 4
     
     # ═══════════════════════════════════════════════════════════════════════
-    # ✅ CONFIGURABLE SIGMOID TRANSFORMATION
+    # MARKET REGIME ALIGNMENT (NEW) - CALL ONLY ONCE!
     # ═══════════════════════════════════════════════════════════════════════
+    market_regime = MarketRegimeFilter.get_market_regime()  # ← SINGLE CALL
+    regime_bias = market_regime.get('bias', 'NEUTRAL')
     
-    # Get sigmoid divisor from preset (defaults to 35 if not configured)
-    # CONSERVATIVE: 40 (stricter scoring, fewer high-confidence signals)
-    # BALANCED:     35 (standard scoring, balanced distribution)
-    # AGGRESSIVE:   30 (gentler scoring, more signals pass)
-    sigmoid_divisor = PRESET.get('sigmoid_divisor', 35)  # ✅ CRITICAL FIX
+    if regime_bias == side:
+        raw_score += 8
+        reasons.append(f"Market {regime_bias}")
+    elif regime_bias not in ["NEUTRAL", "CAUTION"] and regime_bias != side:
+        raw_score -= 10
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # SIGMOID TRANSFORMATION WITH FLOOR/CEILING
+    # ═══════════════════════════════════════════════════════════════════════
+    sigmoid_divisor = PRESET.get('sigmoid_divisor', 35)
     
-    # Map raw_score to 0-100 scale with realistic distribution
-    # Expected distribution with divisor=35:
-    # raw_score =  -30 → ~25% confidence (very weak)
-    # raw_score =    0 → ~50% confidence (neutral)
-    # raw_score = +30 → ~70% confidence (good)
-    # raw_score = +60 → ~85% confidence (strong)
-    # raw_score = +90 → ~93% confidence (very strong)
+    # Base sigmoid calculation
     confidence = 50 + (45 / (1 + np.exp(-raw_score / sigmoid_divisor)))
     
-    # Final bounds: 30-95%
+    # Apply floor based on number of positive conditions
+    positive_reasons = len([r for r in reasons if r])
+    
+    if positive_reasons >= 8:
+        confidence = max(confidence, 70)
+    elif positive_reasons >= 6:
+        confidence = max(confidence, 60)
+    elif positive_reasons >= 4:
+        confidence = max(confidence, 50)
+    
+    # Apply ceiling for counter-trend trades (REUSE regime_bias - no second call!)
+    if regime_bias == 'LONG' and side == 'SHORT':
+        confidence = min(confidence, 75)
+    elif regime_bias == 'SHORT' and side == 'LONG':
+        confidence = min(confidence, 75)
+    
+    # Final bounds
     confidence = round(min(95, max(30, confidence)), 1)
     
     return confidence, reasons[:12]
+
 # ============================================================================
 # MINI BACKTEST
 # ============================================================================
+
+# ✅ CORRECTED - Stricter mini backtest:
 
 def mini_backtest(
     df: pd.DataFrame,
@@ -3381,7 +3621,7 @@ def mini_backtest(
     side: str,
     rr_ratio: float = 2.0
 ) -> Tuple[bool, Dict]:
-    """Enhanced mini backtest - STRICT SUCCESS CRITERIA"""
+    """Enhanced mini backtest - STRICTER SUCCESS CRITERIA v2"""
     try:
         if len(df) < 25:
             return False, {"reason": "Insufficient data"}
@@ -3389,7 +3629,7 @@ def mini_backtest(
         lookback = min(60, len(df) - 1)
         future_data = df.iloc[:-1].tail(lookback).copy()
         
-        if future_data.empty:
+        if future_data.empty or len(future_data) < 10:
             return False, {"reason": "No future data"}
         
         atr = AverageTrueRange(
@@ -3406,14 +3646,20 @@ def mini_backtest(
             stop_loss = entry_price + (atr * 1.5)
             target = entry_price - (atr * rr_ratio)
         
-        # Track which happened first
         target_hit = False
         stop_hit = False
         target_bar = None
         stop_bar = None
         
+        # Track max favorable/adverse excursion
+        max_profit = 0
+        max_loss = 0
+        
         for i, row in enumerate(future_data.itertuples()):
             if side == "LONG":
+                current_profit = (row.High - entry_price) / entry_price * 100
+                current_loss = (entry_price - row.Low) / entry_price * 100
+                
                 if row.High >= target and not target_hit:
                     target_hit = True
                     target_bar = i
@@ -3421,72 +3667,74 @@ def mini_backtest(
                     stop_hit = True
                     stop_bar = i
             else:
+                current_profit = (entry_price - row.Low) / entry_price * 100
+                current_loss = (row.High - entry_price) / entry_price * 100
+                
                 if row.Low <= target and not target_hit:
                     target_hit = True
                     target_bar = i
                 if row.High >= stop_loss and not stop_hit:
                     stop_hit = True
                     stop_bar = i
+            
+            max_profit = max(max_profit, current_profit)
+            max_loss = max(max_loss, current_loss)
         
-        # ✅ FIX #5: STRICT SUCCESS CRITERIA
+        # ✅ STRICTER SUCCESS CRITERIA:
+        
+        # Case 1: Clean winner - target hit, stop never hit
         if target_hit and not stop_hit:
-            success = True  # Clean winner
-            reason = "Target hit, stop not hit"
+            success = True
+            reason = "Target hit, stop never touched"
+        
+        # Case 2: Both hit - which came first?
         elif target_hit and stop_hit:
-            # Which happened first?
             if target_bar < stop_bar:
                 success = True
                 reason = "Target hit before stop"
-            elif target_bar == stop_bar:
-                success = True
-                reason = "Target/stop same bar - took target"
             else:
-                final_price = future_data.iloc[-1]['Close']
-                if side == "LONG":
-                    final_pnl = ((final_price - entry_price) / entry_price) * 100
-                else:
-                    final_pnl = ((entry_price - final_price) / entry_price) * 100
-                success = final_pnl > -0.5
-                reason = f"Stop first but final: {final_pnl:.2f}%"
-
-        elif not target_hit and not stop_hit:
-            # Neither hit - check final P&L
+                # Stop hit first = FAILURE (even if recovered)
+                success = False
+                reason = f"Stop hit first (bar {stop_bar} vs {target_bar})"
+        
+        # Case 3: Only stop hit = FAILURE
+        elif stop_hit and not target_hit:
+            success = False
+            reason = f"Stop hit, no target (max profit was {max_profit:.1f}%)"
+        
+        # Case 4: Neither hit - STRICTER CRITERIA
+        else:
             final_price = future_data.iloc[-1]['Close']
             if side == "LONG":
                 final_pnl_pct = ((final_price - entry_price) / entry_price) * 100
             else:
                 final_pnl_pct = ((entry_price - final_price) / entry_price) * 100
             
-            # Must be positive AND > 1% to pass
-            success = final_pnl_pct > 0.3
-            reason = f"Final P&L: {final_pnl_pct:.2f}%"
-        else:
-            # Stop hit, target not hit
-            final_price = future_data.iloc[-1]['Close']
-            if side == "LONG":
-                final_pnl = ((final_price - entry_price) / entry_price) * 100
-            else:
-                final_pnl = ((entry_price - final_price) / entry_price) * 100
-            success = final_pnl > -1.0
-            reason = f"Stop hit, final: {final_pnl:.2f}%"
-        
-        max_favorable = (future_data['High'].max() - entry_price) / entry_price * 100 if side == "LONG" else (entry_price - future_data['Low'].min()) / entry_price * 100
-        max_adverse = (future_data['Low'].min() - entry_price) / entry_price * 100 if side == "LONG" else (entry_price - future_data['High'].max()) / entry_price * 100
+            # ✅ NEW: Must have positive final P&L AND good max profit potential
+            # AND max loss must not have exceeded 50% of stop distance
+            stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100
+            
+            success = (
+                final_pnl_pct >= 1.0 and                    # ← Raised from 0.3% to 1.0%
+                max_profit >= stop_distance_pct * 0.5 and  # ← Must have shown some profit potential
+                max_loss < stop_distance_pct * 0.8         # ← Must not have nearly stopped out
+            )
+            reason = f"Final: {final_pnl_pct:.1f}%, MaxProfit: {max_profit:.1f}%, MaxLoss: {max_loss:.1f}%"
         
         metrics = {
-        "target_hit": target_hit,
-        "stop_hit": stop_hit,
-        "success_reason": reason,
-        "max_favorable": round(max_favorable, 2),
-        "max_adverse": round(max_adverse, 2),
-        "bars_analyzed": lookback
-    }
+            "target_hit": target_hit,
+            "stop_hit": stop_hit,
+            "success_reason": reason,
+            "max_favorable": round(max_profit, 2),
+            "max_adverse": round(max_loss, 2),
+            "bars_analyzed": lookback
+        }
         
         return success, metrics
         
     except Exception as e:
         return False, {"reason": str(e)[:50]}
-
+    
 # ============================================================================
 # DATA LOADING FUNCTIONS
 # ============================================================================
@@ -3810,6 +4058,12 @@ def scan_ticker(
     run_full_backtest: bool = False
 ) -> Optional[Dict]:
     """Complete scanner - FULLY FIXED VERSION WITH PROPER DATA HANDLING"""
+    market_regime = MarketRegimeFilter.get_market_regime()
+    # Skip if market is too volatile
+    if market_regime.get('regime') == 'HIGH_VOLATILITY':
+        stats["volatility_fail"] += 1
+        log_rejection("Market volatility", f"Regime: {market_regime['regime']}")
+        return None
     
     global stats, rejection_samples
     stats["total"] += 1
@@ -3934,7 +4188,7 @@ def scan_ticker(
             sr_info = SRClusterDetector.detect(df_t)
             candle = CandlestickPatternDetector.detect(df_t)
             st_direction, st_strength, st_metrics = SupertrendIndicator.calculate(df_t)
-            mtf_trend = mtf_analyzer.get_trend(ticker)
+            mtf_trend = MultiTimeframeAnalyzer.get_trend_from_cache(df_t)
         except Exception as e:
             stats["indicator_fail"] += 1
             log_rejection("Analyzer error", str(e)[:40])
@@ -4117,20 +4371,36 @@ def scan_ticker(
         # ====================================================================
         # PORTFOLIO RISK CHECK (IF ENABLED)
         # ====================================================================
-        # if USE_PORTFOLIO_RISK and portfolio_mgr:
-        #     can_add, reason = portfolio_mgr.can_add_trade({
-        #         'ticker': ticker,
-        #         'side': side,
-        #         'position_value': trade_rule.position_value,
-        #         'risk_amount': trade_rule.risk_amount,
-        #         'sector': sector,
-        #     })
+        if USE_PORTFOLIO_RISK and portfolio_mgr:
+            can_add, reason = portfolio_mgr.can_add_trade({
+                'ticker': ticker,
+                'side': side,
+                'position_value': trade_rule.position_value,
+                'risk_amount': trade_rule.risk_amount,
+                'sector': sector,
+            })
             
-        #     if not can_add:
-        #         stats["portfolio_fail"] += 1
-        #         log_rejection("Portfolio limit", reason)
-        #         result['portfolio_warning'] = reason
-        #         return None
+            if not can_add:
+                stats["portfolio_fail"] += 1
+                log_rejection("Portfolio limit", reason)
+                result['portfolio_warning'] = reason
+                return None
+        # ✅ ADD in scan_ticker() after running analyzers:
+
+        # Calculate Relative Strength vs Nifty
+        rs_value, rs_interpretation = RelativeStrengthCalculator.calculate_rs(df_t)
+        
+        # Reject weak stocks for LONG signals
+        if side == "LONG" and rs_interpretation in ["WEAK", "VERY_WEAK"]:
+            stats["confidence_fail"] += 1
+            log_rejection("Weak RS", f"RS: {rs_value:.0f} ({rs_interpretation})")
+            return None
+        
+        # Reject strong stocks for SHORT signals
+        if side == "SHORT" and rs_interpretation in ["STRONG", "VERY_STRONG"]:
+            stats["confidence_fail"] += 1
+            log_rejection("Strong RS", f"RS: {rs_value:.0f} ({rs_interpretation})")
+            return None
         
         # ====================================================================
         # SUCCESS - BUILD RESULT OBJECT
