@@ -308,7 +308,7 @@ def update_google_sheet(signals_data):
         
         # Format all signals into rows
         sorted_signals = sorted(signals_data, key=lambda x: x.get('Confidence', 0), reverse=True)
-        top_5_signals = sorted_signals[:1]  # Take only top 5
+        top_5_signals = sorted_signals[:5]  # Take only top 5
 
         logger.info(f"📊 Total signals: {len(signals_data)}, selecting top 5 by confidence")
         
@@ -4667,6 +4667,89 @@ def classify_signal_tier(result: Dict, backtest_result: Optional[BacktestResult]
     return "REJECTED"
 
 
+
+def select_top_2_stocks(results: list) -> list:
+    """Auto-select TOP 2 stocks by Backtest Win Rate"""
+    
+    print("\n" + "="*120)
+    print("🎯 AUTO TOP 2 STOCK SELECTION - BY BACKTEST WIN RATE")
+    print("="*120)
+    
+    backtest_validated = [r for r in results if r.get('backtest_validated') and 'backtest' in r]
+    
+    if not backtest_validated:
+        print("⚠️  No backtest data! Using top 2 by confidence...")
+        top_2 = results[:2]
+    else:
+        print(f"✓ Found {len(backtest_validated)} stocks with backtest data\n")
+        sorted_stocks = sorted(
+            backtest_validated,
+            key=lambda x: (
+                x.get('backtest', {}).get('win_rate', 0),
+                x.get('backtest', {}).get('profit_factor', 0),
+                x.get('confidence', 0)
+            ),
+            reverse=True
+        )
+        top_2 = sorted_stocks[:2]
+    
+    print("🏆 TOP 2 SELECTED:")
+    print("="*120)
+    
+    for i, stock in enumerate(top_2, 1):
+        bt = stock.get('backtest', {})
+        print(f"\n#{i} {stock['ticker']} ({stock['side']})")
+        print(f"   Entry: ₹{stock['entry_price']:.2f} | SL: ₹{stock['stop_loss']:.2f} | T1: ₹{stock['target_1']:.2f} | T2: ₹{stock['target_2']:.2f}")
+        print(f"   R:R: {stock['risk_reward']:.1f}x | Qty: {stock['qty']} | Confidence: {stock['confidence']:.1f}%")
+        if bt:
+            print(f"   ⭐ Win Rate: {bt.get('win_rate', 0):.1f}% | Profit Factor: {bt.get('profit_factor', 0):.1f}x")
+    
+    print("\n💰 POSITION SIZING (₹10,000 capital):")
+    for i, stock in enumerate(top_2, 1):
+        shares = int(5000 / stock['entry_price'])
+        cost = shares * stock['entry_price']
+        max_loss = shares * abs(stock['entry_price'] - stock['stop_loss'])
+        print(f"  #{i} {stock['ticker']}: Buy {shares} @ ₹{stock['entry_price']:.2f} = ₹{cost:.2f} (Risk: ₹{max_loss:.2f})")
+    
+    print("="*120 + "\n")
+    return top_2
+
+
+def export_top_2_files(top_2: list, signals_dir: str, timestamp: str):
+    """Export TOP 2 to txt and csv files"""
+    import csv
+    
+    txt_file = os.path.join(signals_dir, f"TOP_2_PICKS_{timestamp}.txt")
+    with open(txt_file, 'w', encoding='utf-8') as f:
+        f.write(f"🎯 TOP 2 PICKS - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("="*80 + "\n\n")
+        for i, s in enumerate(top_2, 1):
+            bt = s.get('backtest', {})
+            f.write(f"#{i} {s['ticker']} ({s['side']})\n")
+            f.write(f"  Entry: ₹{s['entry_price']:.2f} | SL: ₹{s['stop_loss']:.2f}\n")
+            f.write(f"  T1: ₹{s['target_1']:.2f} | T2: ₹{s['target_2']:.2f}\n")
+            f.write(f"  Confidence: {s['confidence']:.1f}%")
+            if bt:
+                f.write(f" | Win Rate: {bt.get('win_rate', 0):.1f}%\n")
+            f.write("\n" + "─"*80 + "\n\n")
+    
+    csv_file = os.path.join(signals_dir, f"TOP_2_PICKS_{timestamp}.csv")
+    with open(csv_file, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Rank', 'Ticker', 'Side', 'Entry', 'SL', 'T1', 'T2', 'Confidence', 'WinRate'])
+        for i, s in enumerate(top_2, 1):
+            bt = s.get('backtest', {})
+            writer.writerow([
+                i, s['ticker'], s['side'], 
+                f"{s['entry_price']:.2f}", f"{s['stop_loss']:.2f}",
+                f"{s['target_1']:.2f}", f"{s['target_2']:.2f}",
+                f"{s['confidence']:.1f}",
+                f"{bt.get('win_rate', 0):.1f}" if bt else "N/A"
+            ])
+    
+    print(f"✅ TOP 2 files: {txt_file}, {csv_file}\n")
+    return txt_file, csv_file
+
 def apply_tier_based_filtering(results: List[Dict]) -> Dict[str, List[Dict]]:
     """Separate results into tiers"""
     
@@ -4912,6 +4995,13 @@ def main():
             print(f"   Backtest Validated: {validated}/{len(results)}")
     
     print(f"\n💾 OUTPUT: {SIGNALS_DIR}/")
+    
+    # Auto TOP 2 selection
+    if results and len(results) >= 2:
+        top_2_picks = select_top_2_stocks(results)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        export_top_2_files(top_2_picks, SIGNALS_DIR, timestamp)
+    
     print("\n" + "="*120 + "\n")
     return results
 
