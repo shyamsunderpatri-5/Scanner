@@ -2619,6 +2619,7 @@ class AdvancedBacktester:
             reliability_score=round(reliability_score, 1),
             expectancy=round(expectancy, 2)
         )
+    
     def walk_forward_validation(
     self,
     df: pd.DataFrame,
@@ -3029,7 +3030,7 @@ class AdvancedBacktester:
         
         return max(0, min(100, score))
     
-        def monte_carlo_simulation(
+    def monte_carlo_simulation(
         self,
         backtest_result: BacktestResult,
         simulations: int = 1000,
