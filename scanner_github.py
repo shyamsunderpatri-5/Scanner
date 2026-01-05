@@ -2619,31 +2619,7 @@ class AdvancedBacktester:
             reliability_score=round(reliability_score, 1),
             expectancy=round(expectancy, 2)
         )
-    
-    def _calculate_reliability_score(
-        self,
-        win_rate: float,
-        profit_factor: float,
-        max_drawdown: float,
-        sharpe_ratio: float
-    ) -> float:
-        """Calculate 0-100 reliability score"""
-        
-        wr_score = min(100, (win_rate - 40) * 2.5) if win_rate > 40 else 0
-        pf_score = min(100, (profit_factor - 1) * 50) if profit_factor > 1 else 0
-        dd_score = max(0, 100 - max_drawdown * 2)
-        sharpe_score = min(100, sharpe_ratio * 33) if sharpe_ratio > 0 else 0
-        
-        score = (
-            wr_score * 0.30 +
-            pf_score * 0.30 +
-            dd_score * 0.20 +
-            sharpe_score * 0.20
-        )
-        
-        return max(0, min(100, score))
-    
-    def walk_forward_validation(
+     def walk_forward_validation(
     self,
     df: pd.DataFrame,
     signal_type: str,
@@ -3029,7 +3005,31 @@ class AdvancedBacktester:
             passed=passed
         )
    
-    def monte_carlo_simulation(
+
+    def _calculate_reliability_score(
+        self,
+        win_rate: float,
+        profit_factor: float,
+        max_drawdown: float,
+        sharpe_ratio: float
+    ) -> float:
+        """Calculate 0-100 reliability score"""
+        
+        wr_score = min(100, (win_rate - 40) * 2.5) if win_rate > 40 else 0
+        pf_score = min(100, (profit_factor - 1) * 50) if profit_factor > 1 else 0
+        dd_score = max(0, 100 - max_drawdown * 2)
+        sharpe_score = min(100, sharpe_ratio * 33) if sharpe_ratio > 0 else 0
+        
+        score = (
+            wr_score * 0.30 +
+            pf_score * 0.30 +
+            dd_score * 0.20 +
+            sharpe_score * 0.20
+        )
+        
+        return max(0, min(100, score))
+    
+        def monte_carlo_simulation(
         self,
         backtest_result: BacktestResult,
         simulations: int = 1000,
@@ -3085,6 +3085,10 @@ class AdvancedBacktester:
             confidence_95=(round(confidence_95[0], 2), round(confidence_95[1], 2)),
             risk_of_ruin=round(risk_of_ruin * 100, 2)
         )
+
+
+
+   
 # ============================================================================
 # FUNDAMENTALS FETCHER
 # ============================================================================
@@ -4042,9 +4046,307 @@ def build_cache(tickers: List[str]) -> Optional[pd.DataFrame]:
     except Exception as e:
         print(f"\n  ❌ Error concatenating data: {e}")
         return None
+
+# ============================================================================
+# TREND STRENGTH CALCULATOR (NEW)
+# ============================================================================
+
+def calculate_trend_strength(df: pd.DataFrame) -> Tuple[float, str]:
+    """
+    Calculate trend strength (0-100)
+    Returns: (strength_score, interpretation)
+    
+    - STRONG: Score >= 70 (trending strongly)
+    - MODERATE: Score 40-70 (decent trend)
+    - WEAK: Score < 40 (choppy/ranging)
+    """
+    try:
+        if len(df) < 50:
+            return 50, "MODERATE"
+        
+        close = df['Close']
+        
+        # Calculate EMAs
+        ema20 = close.ewm(span=20, adjust=False).mean()
+        ema50 = close.ewm(span=50, adjust=False).mean()
+        ema200 = close.ewm(span=200, adjust=False).mean() if len(df) >= 200 else ema50
+        
+        current_price = float(close.iloc[-1])
+        current_ema20 = float(ema20.iloc[-1])
+        current_ema50 = float(ema50.iloc[-1])
+        current_ema200 = float(ema200.iloc[-1])
+        
+        # Component 1: EMA separation as % of price (max 30 points)
+        ema_separation = abs(current_ema20 - current_ema50) / current_price * 100
+        ema_score = min(30, ema_separation * 8)
+        
+        # Component 2: Price distance from EMA20 (max 20 points)
+        price_distance = abs(current_price - current_ema20) / current_price * 100
+        distance_score = min(20, price_distance * 5)
+        
+        # Component 3: Consecutive days in trend (max 25 points)
+        trend_up = current_price > current_ema20
+        trend_days = 0
+        for i in range(1, min(20, len(close))):
+            if trend_up:
+                if float(close.iloc[-i]) > float(ema20.iloc[-i]):
+                    trend_days += 1
+                else:
+                    break
+            else:
+                if float(close.iloc[-i]) < float(ema20.iloc[-i]):
+                    trend_days += 1
+                else:
+                    break
+        consistency_score = min(25, trend_days * 2.5)
+        
+        # Component 4: EMA alignment bonus (max 25 points)
+        alignment_score = 0
+        if trend_up:
+            if current_price > current_ema20 > current_ema50:
+                alignment_score = 15
+            if current_price > current_ema20 > current_ema50 > current_ema200:
+                alignment_score = 25
+        else:
+            if current_price < current_ema20 < current_ema50:
+                alignment_score = 15
+            if current_price < current_ema20 < current_ema50 < current_ema200:
+                alignment_score = 25
+        
+        # Calculate total strength (0-100)
+        strength = ema_score + distance_score + consistency_score + alignment_score
+        strength = max(0, min(100, strength))
+        
+        # Interpretation
+        if strength >= 70:
+            interpretation = "STRONG"
+        elif strength >= 40:
+            interpretation = "MODERATE"
+        else:
+            interpretation = "WEAK"
+        
+        return round(strength, 1), interpretation
+        
+    except Exception as e:
+        logger.debug(f"Trend strength calculation failed: {e}")
+        return 50, "MODERATE"
+
+
+# ============================================================================
+# BREAKOUT CONFIRMATION FILTER (NEW)
+# ============================================================================
+
+def is_breakout_valid(df: pd.DataFrame, side: str, price: float) -> Tuple[bool, str]:
+    """
+    Check if breakout/breakdown is confirmed with volume
+    
+    Returns: (is_valid, reason)
+    
+    Criteria:
+    - LONG: Price near 20-day high + volume > 1.3x average
+    - SHORT: Price near 20-day low + volume > 1.3x average
+    """
+    try:
+        if len(df) < 20:
+            return True, "Insufficient data for breakout check"
+        
+        close = df['Close'].iloc[-1]
+        volume = df['Volume'].iloc[-1]
+        avg_volume = df['Volume'].tail(20).mean()
+        
+        high_20 = df['High'].tail(20).max()
+        low_20 = df['Low'].tail(20).min()
+        high_50 = df['High'].tail(50).max() if len(df) >= 50 else high_20
+        low_50 = df['Low'].tail(50).min() if len(df) >= 50 else low_20
+        
+        volume_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+        
+        if side == "LONG":
+            # Check if at/near 20-day high (within 2%)
+            near_high = close >= high_20 * 0.98
+            
+            # Check if breaking 50-day high (stronger signal)
+            breaking_50 = close >= high_50 * 0.99
+            
+            if breaking_50:
+                if volume_ratio >= 1.5:
+                    return True, "Strong breakout: 50-day high with heavy volume"
+                elif volume_ratio >= 1.2:
+                    return True, "Breakout: 50-day high with good volume"
+                else:
+                    return False, f"Breakout without volume ({volume_ratio:.1f}x)"
+            
+            elif near_high:
+                if volume_ratio >= 1.3:
+                    return True, "Breakout: 20-day high with volume confirmation"
+                elif volume_ratio >= 1.0:
+                    return True, "Near 20-day high with average volume"
+                else:
+                    return False, f"Near high but weak volume ({volume_ratio:.1f}x)"
+            
+            else:
+                # Not a breakout setup - that's okay
+                return True, "Not a breakout pattern"
+        
+        else:  # SHORT
+            near_low = close <= low_20 * 1.02
+            breaking_50_low = close <= low_50 * 1.01
+            
+            if breaking_50_low:
+                if volume_ratio >= 1.5:
+                    return True, "Strong breakdown: 50-day low with heavy volume"
+                elif volume_ratio >= 1.2:
+                    return True, "Breakdown: 50-day low with good volume"
+                else:
+                    return False, f"Breakdown without volume ({volume_ratio:.1f}x)"
+            
+            elif near_low:
+                if volume_ratio >= 1.3:
+                    return True, "Breakdown: 20-day low with volume confirmation"
+                elif volume_ratio >= 1.0:
+                    return True, "Near 20-day low with average volume"
+                else:
+                    return False, f"Near low but weak volume ({volume_ratio:.1f}x)"
+            
+            else:
+                return True, "Not a breakdown pattern"
+        
+    except Exception as e:
+        logger.debug(f"Breakout validation failed: {e}")
+        return True, "Breakout check failed"
+
+
+# ============================================================================
+# SETUP TYPE CLASSIFIER & HISTORY TRACKER (NEW)
+# ============================================================================
+
+# Global tracking of setup performance
+SETUP_HISTORY = {
+    "EMA_BOUNCE": {"wins": 0, "losses": 0, "total_pnl": 0},
+    "BREAKOUT": {"wins": 0, "losses": 0, "total_pnl": 0},
+    "VCP": {"wins": 0, "losses": 0, "total_pnl": 0},
+    "SUPPORT_BOUNCE": {"wins": 0, "losses": 0, "total_pnl": 0},
+    "RSI_REVERSAL": {"wins": 0, "losses": 0, "total_pnl": 0},
+    "MOMENTUM": {"wins": 0, "losses": 0, "total_pnl": 0},
+    "GAP_PLAY": {"wins": 0, "losses": 0, "total_pnl": 0},
+    "UNKNOWN": {"wins": 0, "losses": 0, "total_pnl": 0},
+}
+
+
+def get_setup_type(reasons: List[str], candle_pattern: str = "", sr_bias: str = "") -> str:
+    """
+    Classify the setup type based on entry reasons
+    
+    Args:
+        reasons: List of entry reasons from scoring
+        candle_pattern: Detected candlestick pattern
+        sr_bias: Support/Resistance bias
+    
+    Returns:
+        Setup type string
+    """
+    try:
+        reason_str = " ".join(reasons).lower()
+        
+        # Priority order of setup classification
+        
+        # 1. VCP (Volatility Contraction Pattern) - High priority
+        if "vcp" in reason_str or "volatility contraction" in reason_str:
+            return "VCP"
+        
+        # 2. Breakout/Breakdown
+        if "breakout" in reason_str or "breaking" in reason_str:
+            return "BREAKOUT"
+        if "volume" in reason_str and ("strong" in reason_str or "heavy" in reason_str):
+            return "BREAKOUT"
+        
+        # 3. Support/Resistance Bounce
+        if sr_bias in ["AT_SUPPORT", "NEAR_SUPPORT"]:
+            return "SUPPORT_BOUNCE"
+        if "support" in reason_str or "at support" in reason_str:
+            return "SUPPORT_BOUNCE"
+        
+        # 4. Gap Play
+        if "gap" in reason_str:
+            return "GAP_PLAY"
+        
+        # 5. RSI Reversal
+        if "rsi" in reason_str and ("oversold" in reason_str or "overbought" in reason_str):
+            return "RSI_REVERSAL"
+        if "rsi" in reason_str and "optimal" in reason_str:
+            return "RSI_REVERSAL"
+        
+        # 6. Strong Momentum
+        if "momentum" in reason_str and "strong" in reason_str:
+            return "MOMENTUM"
+        if "adx" in reason_str or "supertrend" in reason_str:
+            return "MOMENTUM"
+        
+        # 7. EMA Bounce (most common)
+        if "ema" in reason_str:
+            return "EMA_BOUNCE"
+        
+        # 8. Default
+        return "UNKNOWN"
+        
+    except Exception:
+        return "UNKNOWN"
+
+
+def get_setup_win_rate(setup_type: str) -> float:
+    """Get historical win rate for a setup type"""
+    try:
+        history = SETUP_HISTORY.get(setup_type, {"wins": 0, "losses": 0})
+        total = history["wins"] + history["losses"]
+        if total >= 5:  # Need at least 5 trades for meaningful stats
+            return (history["wins"] / total) * 100
+        return 50.0  # Default 50% if not enough history
+    except:
+        return 50.0
+
+
+def update_setup_history(setup_type: str, is_win: bool, pnl_pct: float = 0):
+    """Update setup history after trade closes"""
+    global SETUP_HISTORY
+    try:
+        if setup_type not in SETUP_HISTORY:
+            SETUP_HISTORY[setup_type] = {"wins": 0, "losses": 0, "total_pnl": 0}
+        
+        if is_win:
+            SETUP_HISTORY[setup_type]["wins"] += 1
+        else:
+            SETUP_HISTORY[setup_type]["losses"] += 1
+        
+        SETUP_HISTORY[setup_type]["total_pnl"] += pnl_pct
+        
+    except Exception:
+        pass
+
+
+def print_setup_statistics():
+    """Print performance by setup type"""
+    print("\n" + "="*80)
+    print("SETUP TYPE PERFORMANCE")
+    print("="*80)
+    print(f"{'Setup Type':<20} {'Trades':>8} {'Wins':>8} {'Win Rate':>10} {'Avg P&L':>10}")
+    print("-"*80)
+    
+    for setup_type, stats in SETUP_HISTORY.items():
+        total = stats["wins"] + stats["losses"]
+        if total > 0:
+            win_rate = (stats["wins"] / total) * 100
+            avg_pnl = stats["total_pnl"] / total
+            print(f"{setup_type:<20} {total:>8} {stats['wins']:>8} {win_rate:>9.1f}% {avg_pnl:>9.2f}%")
+    
+    print("="*80)
 # ============================================================================
 # MAIN SCANNER FUNCTION - COMPLETE WITH TICKER MATCHING FIX
 # ============================================================================
+
+# ============================================================================
+# MAIN SCANNER FUNCTION - COMPLETE FIXED VERSION WITH ALL IMPROVEMENTS
+# ============================================================================
+
 def scan_ticker(
     ticker: str,
     df_all: pd.DataFrame,
@@ -4057,30 +4359,49 @@ def scan_ticker(
     backtester: Optional[AdvancedBacktester] = None,
     run_full_backtest: bool = False
 ) -> Optional[Dict]:
-    """Complete scanner - FULLY FIXED VERSION WITH PROPER DATA HANDLING"""
-    # âœ… CRITICAL: Declare globals FIRST, before any code
+    """
+    Complete scanner - FULLY FIXED VERSION WITH ALL IMPROVEMENTS
+    
+    Includes:
+    ✅ All bug fixes
+    ✅ Trend Strength Filter
+    ✅ Breakout Confirmation Filter
+    ✅ Setup Type Classification
+    ✅ Relative Strength vs Nifty
+    ✅ Market Regime Filter
+    """
+    
+    # =========================================================================
+    # STEP 0: CRITICAL - Declare globals and define log_rejection FIRST!
+    # =========================================================================
     global stats, rejection_samples
     
-    market_regime = MarketRegimeFilter.get_market_regime()
-    # Skip if market is too volatile
-    if market_regime.get('regime') == 'HIGH_VOLATILITY':
-        stats["volatility_fail"] += 1
-        log_rejection("Market volatility", f"Regime: {market_regime['regime']}")
-        return None
-    
-    stats["total"] += 1
-    
+    # ✅ FIX: Define log_rejection BEFORE any code uses it!
     def log_rejection(reason: str, detail: str = ""):
+        """Log rejection reason for debugging"""
         if len(rejection_samples) < 15:
             msg = f"{ticker.replace('.NS', '').replace('.BO', '')}: {reason}"
             if detail:
                 msg += f" ({detail})"
             rejection_samples.append(msg)
     
+    # ✅ NOW it's safe to use log_rejection and increment stats
+    stats["total"] += 1
+    
+    # =========================================================================
+    # STEP 1: MARKET REGIME CHECK (Early exit if unfavorable)
+    # =========================================================================
+    market_regime = MarketRegimeFilter.get_market_regime()
+    
+    if market_regime.get('regime') == 'HIGH_VOLATILITY':
+        stats["volatility_fail"] += 1
+        log_rejection("Market volatility", f"Regime: {market_regime['regime']}")
+        return None
+    
     try:
-        # ====================================================================
-        # GET DATA FOR THIS TICKER
-        # ====================================================================
+        # =====================================================================
+        # STEP 2: GET DATA FOR THIS TICKER
+        # =====================================================================
         df_t = df_all[df_all["ticker"] == ticker].copy()
         
         if df_t.empty:
@@ -4088,10 +4409,10 @@ def scan_ticker(
             log_rejection("No data", "Ticker not in cache")
             return None
         
-        # ====================================================================
-        # PREPARE DATA - ENSURE CLEAN DATAFRAME
-        # ====================================================================
-        df_t = df_t.copy()  # Make a fresh copy
+        # =====================================================================
+        # STEP 3: PREPARE DATA - ENSURE CLEAN DATAFRAME
+        # =====================================================================
+        df_t = df_t.copy()
         
         # Sort by date
         if 'Date' in df_t.columns:
@@ -4113,9 +4434,9 @@ def scan_ticker(
             log_rejection("Data type error", f"Got {type(df_t)}")
             return None
         
-        # ====================================================================
-        # VERIFY DATA FRESHNESS
-        # ====================================================================
+        # =====================================================================
+        # STEP 4: VERIFY DATA FRESHNESS
+        # =====================================================================
         try:
             last_date = df_t.index[-1]
             days_old = (datetime.now() - pd.to_datetime(last_date)).days
@@ -4129,9 +4450,9 @@ def scan_ticker(
             log_rejection("Date error", str(e)[:30])
             return None
         
-        # ====================================================================
-        # VERIFY DATA UNIQUENESS
-        # ====================================================================
+        # =====================================================================
+        # STEP 5: VERIFY DATA UNIQUENESS
+        # =====================================================================
         unique_prices = df_t['Close'].nunique()
         total_rows = len(df_t)
         
@@ -4140,9 +4461,9 @@ def scan_ticker(
             log_rejection("Duplicate data", f"Only {unique_prices} unique prices")
             return None
         
-        # ====================================================================
-        # DATA QUALITY CHECKS
-        # ====================================================================
+        # =====================================================================
+        # STEP 6: DATA QUALITY CHECKS
+        # =====================================================================
         if not quality_validator.has_sufficient_history(df_t, min_bars=60):
             stats["indicator_fail"] += 1
             log_rejection("Insufficient history", f"{len(df_t)} bars")
@@ -4154,9 +4475,9 @@ def scan_ticker(
             log_rejection("Invalid prices", price_reason)
             return None
         
-        # ====================================================================
-        # CALCULATE INDICATORS
-        # ====================================================================
+        # =====================================================================
+        # STEP 7: CALCULATE INDICATORS
+        # =====================================================================
         ind = calculate_indicators(df_t)
         if ind is None:
             stats["indicator_fail"] += 1
@@ -4169,18 +4490,29 @@ def scan_ticker(
         if stats["total"] <= 5:
             print(f"\n  DEBUG: {ticker} - Price: ₹{price:.2f} | RSI: {ind['rsi']:.1f} | Vol: {ind['volume_ratio']:.2f}x")
         
-        # ====================================================================
-        # VOLATILITY REGIME FILTER
-        # ====================================================================
+        # =====================================================================
+        # STEP 8: VOLATILITY REGIME FILTER
+        # =====================================================================
         vol_ok, vol_reason, vol_metrics = VolatilityRegimeFilter.analyze_regime(df_t, price)
         if not vol_ok:
             stats["volatility_fail"] += 1
             log_rejection("Volatility", vol_reason)
             return None
         
-        # ====================================================================
-        # RUN ALL ANALYZERS
-        # ====================================================================
+        # =====================================================================
+        # STEP 9: TREND STRENGTH CHECK (NEW IMPROVEMENT #1)
+        # =====================================================================
+        trend_strength, trend_interpretation = calculate_trend_strength(df_t)
+        
+        # Reject very weak trends (optional - can be adjusted)
+        if trend_interpretation == "WEAK" and trend_strength < 25:
+            stats["indicator_fail"] += 1
+            log_rejection("Weak trend", f"Strength: {trend_strength:.0f}")
+            return None
+        
+        # =====================================================================
+        # STEP 10: RUN ALL ANALYZERS
+        # =====================================================================
         try:
             volume_score, volume_signal, volume_metrics = InstitutionalVolumeAnalyzer.analyze(df_t, ind["volume"])
             vsa_score, vsa_signal, vsa_metrics = VolumeSpreadAnalyzer.analyze(df_t)
@@ -4196,14 +4528,14 @@ def scan_ticker(
             log_rejection("Analyzer error", str(e)[:40])
             return None
         
-        # ====================================================================
-        # GET FUNDAMENTALS
-        # ====================================================================
+        # =====================================================================
+        # STEP 11: GET FUNDAMENTALS
+        # =====================================================================
         sector, pe = get_fundamentals(ticker)
         
-        # ====================================================================
-        # SECTOR ROTATION (IF ENABLED)
-        # ====================================================================
+        # =====================================================================
+        # STEP 12: SECTOR ROTATION (IF ENABLED)
+        # =====================================================================
         sector_rs = None
         if USE_SECTOR_ROTATION and sector_filter and sector:
             try:
@@ -4211,9 +4543,9 @@ def scan_ticker(
             except:
                 sector_rs = None
         
-        # ====================================================================
-        # VIX SENTIMENT (IF ENABLED)
-        # ====================================================================
+        # =====================================================================
+        # STEP 13: VIX SENTIMENT (IF ENABLED)
+        # =====================================================================
         vix_sentiment = None
         if USE_VIX_SENTIMENT and vix_filter:
             try:
@@ -4221,9 +4553,9 @@ def scan_ticker(
             except:
                 vix_sentiment = None
         
-        # ====================================================================
-        # FIBONACCI LEVELS (IF ENABLED)
-        # ====================================================================
+        # =====================================================================
+        # STEP 14: FIBONACCI LEVELS (IF ENABLED)
+        # =====================================================================
         long_fibo_boost = 0
         short_fibo_boost = 0
         if USE_FIBONACCI_SCORING and fibo_detector:
@@ -4235,15 +4567,15 @@ def scan_ticker(
             except:
                 pass
         
-        # ====================================================================
-        # GENERATE ENTRY SIGNALS
-        # ====================================================================
+        # =====================================================================
+        # STEP 15: GENERATE ENTRY SIGNALS
+        # =====================================================================
         long_entry = generate_entry_signal(ind, df_t, "LONG")
         short_entry = generate_entry_signal(ind, df_t, "SHORT")
         
-        # ====================================================================
-        # SCORE SIGNALS
-        # ====================================================================
+        # =====================================================================
+        # STEP 16: SCORE SIGNALS
+        # =====================================================================
         long_conf, long_reasons = score_signal(
             ind, df_t, "LONG", vix_sentiment, sector_rs, long_fibo_boost,
             sr_info, candle, mtf_trend, vol_metrics,
@@ -4266,9 +4598,9 @@ def scan_ticker(
             {'direction': st_direction, 'strength': st_strength}
         )
         
-        # ====================================================================
-        # DETERMINE BEST SIDE
-        # ====================================================================
+        # =====================================================================
+        # STEP 17: DETERMINE BEST SIDE
+        # =====================================================================
         long_valid = long_entry["entry_ready"] and long_conf >= MIN_CONFIDENCE
         short_valid = short_entry["entry_ready"] and short_conf >= MIN_CONFIDENCE
         
@@ -4288,9 +4620,23 @@ def scan_ticker(
             reasons = short_reasons
             entry_info = short_entry
         
-        # ====================================================================
-        # CREATE TRADE RULE
-        # ====================================================================
+        # =====================================================================
+        # STEP 18: BREAKOUT CONFIRMATION CHECK (NEW IMPROVEMENT #2)
+        # =====================================================================
+        breakout_valid, breakout_reason = is_breakout_valid(df_t, side, price)
+        
+        if not breakout_valid:
+            stats["indicator_fail"] += 1
+            log_rejection("Breakout invalid", breakout_reason)
+            return None
+        
+        # Add breakout reason to signal reasons if it's a breakout
+        if "breakout" in breakout_reason.lower() or "breakdown" in breakout_reason.lower():
+            reasons.append(breakout_reason[:50])
+        
+        # =====================================================================
+        # STEP 19: CREATE TRADE RULE
+        # =====================================================================
         trade_rule = TradeRule(ticker.replace(".NS", "").replace(".BO", ""), side, price, ind["atr"])
         trade_rule.calculate_dynamic_targets(confidence)
         
@@ -4299,9 +4645,9 @@ def scan_ticker(
             log_rejection("Low R:R", f"{trade_rule.risk_reward_ratio:.2f}x")
             return None
         
-        # ====================================================================
-        # MINI BACKTEST
-        # ====================================================================
+        # =====================================================================
+        # STEP 20: MINI BACKTEST
+        # =====================================================================
         mini_metrics = {}
         if USE_MINI_BACKTEST:
             mini_passed, mini_metrics = mini_backtest(df_t, price, side, MIN_RR_RATIO)
@@ -4310,9 +4656,9 @@ def scan_ticker(
                 log_rejection("Mini backtest", mini_metrics.get('reason', 'Failed'))
                 return None
         
-        # ====================================================================
-        # FULL BACKTEST (IF REQUESTED)
-        # ====================================================================
+        # =====================================================================
+        # STEP 21: FULL BACKTEST (IF REQUESTED)
+        # =====================================================================
         backtest_result = None
         walk_forward_result = None
         monte_carlo_result = None
@@ -4370,26 +4716,9 @@ def scan_ticker(
                 logger.debug(f"Backtest error for {ticker}: {e}")
                 pass
         
-        # ====================================================================
-        # PORTFOLIO RISK CHECK (IF ENABLED)
-        # ====================================================================
-        if USE_PORTFOLIO_RISK and portfolio_mgr:
-            can_add, reason = portfolio_mgr.can_add_trade({
-                'ticker': ticker,
-                'side': side,
-                'position_value': trade_rule.position_value,
-                'risk_amount': trade_rule.risk_amount,
-                'sector': sector,
-            })
-            
-            if not can_add:
-                stats["portfolio_fail"] += 1
-                log_rejection("Portfolio limit", reason)
-                result['portfolio_warning'] = reason
-                return None
-        # ✅ ADD in scan_ticker() after running analyzers:
-
-        # Calculate Relative Strength vs Nifty
+        # =====================================================================
+        # STEP 22: RELATIVE STRENGTH CHECK (vs Nifty)
+        # =====================================================================
         rs_value, rs_interpretation = RelativeStrengthCalculator.calculate_rs(df_t)
         
         # Reject weak stocks for LONG signals
@@ -4404,14 +4733,51 @@ def scan_ticker(
             log_rejection("Strong RS", f"RS: {rs_value:.0f} ({rs_interpretation})")
             return None
         
-        # ====================================================================
+        # =====================================================================
+        # STEP 23: PORTFOLIO RISK CHECK (IF ENABLED)
+        # =====================================================================
+        if USE_PORTFOLIO_RISK and portfolio_mgr:
+            can_add, reason = portfolio_mgr.can_add_trade({
+                'ticker': ticker,
+                'side': side,
+                'position_value': trade_rule.position_value,
+                'risk_amount': trade_rule.actual_risk,
+                'sector': sector,
+            })
+            
+            if not can_add:
+                stats["portfolio_fail"] += 1
+                log_rejection("Portfolio limit", reason)
+                return None
+        
+        # =====================================================================
+        # STEP 24: CLASSIFY SETUP TYPE (NEW IMPROVEMENT #3)
+        # =====================================================================
+        sr_bias = sr_info.get('bias', 'UNKNOWN')
+        candle_pattern = candle.get('pattern', 'NONE')
+        setup_type = get_setup_type(reasons, candle_pattern, sr_bias)
+        
+        # Get historical win rate for this setup type
+        setup_historical_wr = get_setup_win_rate(setup_type)
+        
+        # =====================================================================
+        # STEP 25: APPLY TREND STRENGTH BONUS/PENALTY
+        # =====================================================================
+        # Boost confidence for strong trends, reduce for weak trends
+        if trend_interpretation == "STRONG":
+            confidence = min(100, confidence + 3)
+            reasons.append(f"Strong trend ({trend_strength:.0f})")
+        elif trend_interpretation == "WEAK":
+            confidence = max(30, confidence - 2)
+        
+        # =====================================================================
         # SUCCESS - BUILD RESULT OBJECT
-        # ====================================================================
+        # =====================================================================
         stats["passed"] += 1
         
         # Print successful signal
         print(f"\n✅ SIGNAL #{stats['passed']}: {ticker.replace('.NS', '').replace('.BO', '')}")
-        print(f"   {side} @ ₹{price:.2f} | Conf: {confidence:.1f}% | R:R: {trade_rule.risk_reward_ratio:.1f}x")
+        print(f"   {side} @ ₹{price:.2f} | Conf: {confidence:.1f}% | R:R: {trade_rule.risk_reward_ratio:.1f}x | Setup: {setup_type}")
         
         result = {
             "ticker": ticker.replace(".NS", "").replace(".BO", ""),
@@ -4428,14 +4794,24 @@ def scan_ticker(
             "risk_reward": round(trade_rule.risk_reward_ratio, 2),
             "qty": trade_rule.qty,
             "position_value": round(trade_rule.position_value, 2),
-            "risk_amount": round(trade_rule.risk_amount, 2),
+            "risk_amount": round(trade_rule.actual_risk, 2),
             "entry_signal": entry_info["entry_signal"],
             "reasons": " | ".join(reasons),
             "sector": sector or "N/A",
             "pe": pe,
             "trade_rule": trade_rule,
             "mini_backtest": mini_metrics,
-            "backtest_validated": False
+            "backtest_validated": False,
+            
+            # NEW FIELDS
+            "setup_type": setup_type,
+            "setup_historical_wr": setup_historical_wr,
+            "trend_strength": trend_strength,
+            "trend_interpretation": trend_interpretation,
+            "relative_strength": rs_value,
+            "rs_interpretation": rs_interpretation,
+            "market_regime": market_regime.get('regime', 'UNKNOWN'),
+            "breakout_info": breakout_reason,
         }
         
         # Add backtest results if available
@@ -4474,7 +4850,7 @@ def scan_ticker(
         log_rejection("Exception", f"{type(e).__name__}: {str(e)[:30]}")
         logger.debug(f"{ticker}: Exception - {str(e)}")
         return None
-    
+
 # ============================================================================
 # HYBRID SCANNING STRATEGY
 # ============================================================================
@@ -4684,7 +5060,7 @@ def print_statistics():
 # ============================================================================
 
 def print_results(results: List[Dict]):
-    """Print formatted results table - TIERED VERSION"""
+    """Print formatted results table - ENHANCED VERSION WITH SETUP TYPE"""
     
     if not results:
         return
@@ -4694,9 +5070,9 @@ def print_results(results: List[Dict]):
     
     total_signals = sum(len(v) for v in tiers.values())
     
-    print(f"\n{'='*180}")
+    print(f"\n{'='*200}")
     print(f"TRADING SIGNALS - TIERED CLASSIFICATION ({total_signals} Total)")
-    print('='*180)
+    print('='*200)
     
     # Print each tier
     tier_info = {
@@ -4714,46 +5090,52 @@ def print_results(results: List[Dict]):
         print(f"\n{tier_title}")
         print(f"   Recommendation: {tier_advice}")
         print(f"   Count: {len(tier_results)} signals")
-        print('-'*180)
+        print('-'*200)
         
-        # Header
+        # Enhanced Header with new columns
         header = (
-            f"{'#':<4} {'TICKER':<12} {'SIDE':<6} {'PRICE':>9} {'CONF':>6} {'RSI':>5} "
-            f"{'ENTRY':>9} {'SL':>9} {'T1':>9} {'T2':>9} {'R:R':>5} {'QTY':>6}"
+            f"{'#':<3} {'TICKER':<10} {'SIDE':<5} {'PRICE':>8} {'CONF':>5} "
+            f"{'ENTRY':>8} {'SL':>8} {'T1':>8} {'R:R':>4} {'SETUP':<15} "
+            f"{'TREND':>6} {'RS':>5}"
         )
         
         if any(r.get('backtest_validated') for r in tier_results):
-            header += f" {'BT_WR':>7} {'BT_PF':>6}"
+            header += f" {'BT_WR':>6} {'BT_PF':>5}"
         
         print(header)
-        print('-'*180)
+        print('-'*200)
         
-        for i, res in enumerate(tier_results[:20], 1):  # Show max 20 per tier
+        for i, res in enumerate(tier_results[:20], 1):
+            # Format setup type (truncate if needed)
+            setup = res.get('setup_type', 'UNKNOWN')[:15]
+            trend = res.get('trend_strength', 0)
+            rs = res.get('relative_strength', 0)
+            
             row = (
-                f"{i:<4} "
+                f"{i:<3} "
                 f"{res['ticker']:<10} "
-                f"{res['side']:<6} "
-                f"₹{res['price']:>8.2f} "
-                f"{res['confidence']:>5.1f}% "
-                f"{res['rsi']:>5.1f} "
-                f"₹{res['entry_price']:>8.2f} "
-                f"₹{res['stop_loss']:>8.2f} "
-                f"₹{res['target_1']:>8.2f} "
-                f"₹{res['target_2']:>8.2f} "
-                f"{res['risk_reward']:>4.1f}x "
-                f"{res['qty']:>6}"
+                f"{res['side']:<5} "
+                f"₹{res['price']:>7.0f} "
+                f"{res['confidence']:>4.0f}% "
+                f"₹{res['entry_price']:>7.0f} "
+                f"₹{res['stop_loss']:>7.0f} "
+                f"₹{res['target_1']:>7.0f} "
+                f"{res['risk_reward']:>3.1f}x "
+                f"{setup:<15} "
+                f"{trend:>5.0f} "
+                f"{rs:>5.0f}"
             )
             
             if res.get('backtest_validated') and 'backtest' in res:
                 bt = res['backtest']
                 row += (
-                    f" {bt['win_rate']:>6.1f}% "
-                    f"{bt['profit_factor']:>5.1f}x"
+                    f" {bt['win_rate']:>5.0f}% "
+                    f"{bt['profit_factor']:>4.1f}x"
                 )
             
             print(row)
     
-    print('='*180)
+    print('='*200)
     
     # Summary
     print(f"\n📊 TIER SUMMARY:")
@@ -4762,7 +5144,19 @@ def print_results(results: List[Dict]):
         if count > 0:
             print(f"   {tier_title}: {count} signals")
     
-    print('='*180)
+    # NEW: Print setup type summary
+    print(f"\n📈 SETUP TYPE BREAKDOWN:")
+    setup_counts = {}
+    for result in results:
+        setup = result.get('setup_type', 'UNKNOWN')
+        setup_counts[setup] = setup_counts.get(setup, 0) + 1
+    
+    for setup, count in sorted(setup_counts.items(), key=lambda x: x[1], reverse=True):
+        historical_wr = get_setup_win_rate(setup)
+        print(f"   {setup:<20}: {count} signals (Historical WR: {historical_wr:.0f}%)")
+    
+    print('='*200)
+    
 # def get_realtime_price(ticker: str) -> Optional[float]:
 #     """Get real-time price from NSE (market hours only)"""
 #     try:
@@ -4786,13 +5180,13 @@ def print_results(results: List[Dict]):
 # ============================================================================
 
 def export_results(results: List[Dict], scan_time: float):
-    """Export results to CSV and HTML"""
+    """Export results to CSV and HTML - ENHANCED WITH NEW FIELDS"""
     
     try:
         os.makedirs(SIGNALS_DIR, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # CSV Export
+        # CSV Export - Enhanced with new fields
         csv_data = []
         for res in results:
             row = {
@@ -4809,6 +5203,15 @@ def export_results(results: List[Dict], scan_time: float):
                 "Quantity": res["qty"],
                 "Sector": res["sector"],
                 "Reasons": res["reasons"],
+                
+                # NEW COLUMNS
+                "SetupType": res.get("setup_type", "UNKNOWN"),
+                "TrendStrength": res.get("trend_strength", 0),
+                "TrendInterpretation": res.get("trend_interpretation", "UNKNOWN"),
+                "RelativeStrength": res.get("relative_strength", 0),
+                "RS_Interpretation": res.get("rs_interpretation", "UNKNOWN"),
+                "MarketRegime": res.get("market_regime", "UNKNOWN"),
+                "BreakoutInfo": res.get("breakout_info", "N/A"),
             }
             
             if res.get('backtest_validated') and 'backtest' in res:
