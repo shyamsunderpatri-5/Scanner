@@ -2619,7 +2619,7 @@ class AdvancedBacktester:
             reliability_score=round(reliability_score, 1),
             expectancy=round(expectancy, 2)
         )
-     def walk_forward_validation(
+    def walk_forward_validation(
     self,
     df: pd.DataFrame,
     signal_type: str,
@@ -3004,7 +3004,7 @@ class AdvancedBacktester:
             consistency_score=round(consistency_score, 1),
             passed=passed
         )
-   
+    
 
     def _calculate_reliability_score(
         self,
