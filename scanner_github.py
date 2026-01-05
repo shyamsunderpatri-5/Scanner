@@ -4058,6 +4058,9 @@ def scan_ticker(
     run_full_backtest: bool = False
 ) -> Optional[Dict]:
     """Complete scanner - FULLY FIXED VERSION WITH PROPER DATA HANDLING"""
+    # âœ… CRITICAL: Declare globals FIRST, before any code
+    global stats, rejection_samples
+    
     market_regime = MarketRegimeFilter.get_market_regime()
     # Skip if market is too volatile
     if market_regime.get('regime') == 'HIGH_VOLATILITY':
@@ -4065,7 +4068,6 @@ def scan_ticker(
         log_rejection("Market volatility", f"Regime: {market_regime['regime']}")
         return None
     
-    global stats, rejection_samples
     stats["total"] += 1
     
     def log_rejection(reason: str, detail: str = ""):
