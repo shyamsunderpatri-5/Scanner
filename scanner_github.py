@@ -308,7 +308,7 @@ def update_google_sheet(signals_data):
         
         # Format all signals into rows
         sorted_signals = sorted(signals_data, key=lambda x: x.get('Confidence', 0), reverse=True)
-        top_5_signals = sorted_signals[:5]  # Take only top 5
+        top_5_signals = sorted_signals[:1]  # Take only top 5
 
         logger.info(f"📊 Total signals: {len(signals_data)}, selecting top 5 by confidence")
         
