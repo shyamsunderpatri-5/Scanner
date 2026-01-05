@@ -5109,19 +5109,6 @@ def main():
     return results
 
 # ============================================================================
-# ENTRY POINT
-# ============================================================================
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Scan interrupted by user")
-        print_statistics()
-    except Exception as e:
-        print(f"\n\n❌ Fatal error: {e}")
-        logger.exception("Fatal error in main execution")
-# ============================================================================
 # EMAIL NOTIFICATION FUNCTION
 # ============================================================================
 
