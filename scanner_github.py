@@ -4788,19 +4788,19 @@ def scan_ticker(
         # =====================================================================
         # STEP 23: PORTFOLIO RISK CHECK (IF ENABLED)
         # =====================================================================
-        if USE_PORTFOLIO_RISK and portfolio_mgr:
-            can_add, reason = portfolio_mgr.can_add_trade({
-                'ticker': ticker,
-                'side': side,
-                'position_value': trade_rule.position_value,
-                'risk_amount': trade_rule.actual_risk,
-                'sector': sector,
-            })
+        # if USE_PORTFOLIO_RISK and portfolio_mgr:
+        #     can_add, reason = portfolio_mgr.can_add_trade({
+        #         'ticker': ticker,
+        #         'side': side,
+        #         'position_value': trade_rule.position_value,
+        #         'risk_amount': trade_rule.actual_risk,
+        #         'sector': sector,
+        #     })
             
-            if not can_add:
-                stats["portfolio_fail"] += 1
-                log_rejection("Portfolio limit", reason)
-                return None
+        #     if not can_add:
+        #         stats["portfolio_fail"] += 1
+        #         log_rejection("Portfolio limit", reason)
+        #         return None
         
         # =====================================================================
         # STEP 24: CLASSIFY SETUP TYPE (NEW IMPROVEMENT #3)
@@ -4942,8 +4942,8 @@ def hybrid_scan_universe(
         
         if result:
             initial_results.append(result)
-            if USE_PORTFOLIO_RISK and portfolio_mgr:
-                portfolio_mgr.add_trade(result)
+            # if USE_PORTFOLIO_RISK and portfolio_mgr:
+            #     portfolio_mgr.add_trade(result)
         
         # Progress bar
         if i % 25 == 0 or i == len(tickers):
