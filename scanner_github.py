@@ -252,10 +252,16 @@ def format_sheet_row(signal_data, entry_date):
 
 def update_google_sheet(signals_data):
     """
-    Update Google Sheet with new trading signals
+    Update Google Sheet with trading signals
+    
+    ✅ FIXED v3.0:
+    - Trusts pre-selected Top 2 from select_top_2_stocks()
+    - No redundant re-selection
+    - Proper column name handling
+    - Enhanced logging
     
     Args:
-        signals_data: List of dictionaries containing signal information
+        signals_data: List of dictionaries from CSV (should be exactly 2 stocks)
     
     Returns:
         Boolean indicating success or failure
@@ -281,12 +287,39 @@ def update_google_sheet(signals_data):
         # Calculate entry date (tomorrow)
         tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
         
-        logger.info(f"📊 Preparing to update Google Sheet: {spreadsheet_id}")
+        logger.info(f"📊 Preparing to update Google Sheet")
         logger.info(f"📅 Entry Date: {tomorrow}")
+        logger.info(f"📥 Received {len(signals_data)} signals from CSV")
         
-        # Check if sheet exists and has headers
+        # ════════════════════════════════════════════════════════════════════
+        # VALIDATE INPUT
+        # ════════════════════════════════════════════════════════════════════
+        
+        if not signals_data:
+            logger.warning("⚠️  No signals received - nothing to update")
+            return True
+        
+        # Log what we received
+        logger.info(f"\n{'='*70}")
+        logger.info(f"📋 SIGNALS TO UPLOAD:")
+        logger.info(f"{'='*70}")
+        
+        for i, sig in enumerate(signals_data, 1):
+            ticker = sig.get('ticker', sig.get('Ticker', 'N/A'))
+            side = sig.get('side', sig.get('Side', 'N/A'))
+            tier = sig.get('tier', sig.get('Tier', 'N/A'))
+            conf = sig.get('confidence', sig.get('Confidence', 0))
+            bt_wr = sig.get('BT_WR', 0)
+            
+            logger.info(f"  #{i}: {ticker} | {side} | Tier: {tier} | Conf: {conf}% | BT_WR: {bt_wr}%")
+        
+        logger.info(f"{'='*70}\n")
+        
+        # ════════════════════════════════════════════════════════════════════
+        # ENSURE HEADERS EXIST
+        # ════════════════════════════════════════════════════════════════════
+        
         try:
-            # Read first row to check for headers
             result = service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
                 range=f'{sheet_name}!A1:J1'
@@ -294,7 +327,6 @@ def update_google_sheet(signals_data):
             
             values = result.get('values', [])
             
-            # If no headers, add them
             if not values:
                 headers = [
                     ['Ticker', 'Position', 'Entry_Price', 'Quantity', 'Stop_Loss', 
@@ -314,125 +346,36 @@ def update_google_sheet(signals_data):
             logger.error(f"Error checking/creating headers: {e}")
             return False
         
-        # ⭐⭐⭐ FIXED: Check for backtest data in both formats ⭐⭐⭐
+        # ════════════════════════════════════════════════════════════════════
+        # ✅ TAKE TOP 2 AS-IS (NO RE-SELECTION!)
+        # ════════════════════════════════════════════════════════════════════
         
-        def has_backtest_data(signal):
-            """Check if signal has backtest data (handles both formats)"""
-            # Format 1: CSV columns (BT_WR, BT_PF)
-            if 'BT_WR' in signal and signal['BT_WR'] not in [None, '', 'N/A', 'nan']:
-                try:
-                    float(signal['BT_WR'])
-                    return True
-                except:
-                    pass
-            
-            # Format 2: Nested dict (backtest.win_rate)
-            if signal.get('backtest_validated') and signal.get('backtest'):
-                return True
-            
-            return False
+        # The signals are already pre-selected by select_top_2_stocks()
+        # Just take the first 2 (or all if less than 2)
+        signals_to_upload = signals_data[:2]
         
-        def get_backtest_win_rate(signal):
-            """Get win rate from either format"""
-            # Try CSV column first
-            if 'BT_WR' in signal and signal['BT_WR'] not in [None, '', 'N/A', 'nan']:
-                try:
-                    wr = float(signal['BT_WR'])
-                    # Handle percentage format (e.g., "79.2%" stored as 79.2 or 0.792)
-                    return wr if wr > 1 else wr * 100
-                except:
-                    pass
-            
-            # Try nested dict
-            bt = signal.get('backtest', {})
-            if bt:
-                return bt.get('win_rate', 0)
-            
-            return 0
+        logger.info(f"✅ Using {len(signals_to_upload)} pre-selected signals (no re-ranking)")
         
-        def get_backtest_profit_factor(signal):
-            """Get profit factor from either format"""
-            # Try CSV column first
-            if 'BT_PF' in signal and signal['BT_PF'] not in [None, '', 'N/A', 'nan']:
-                try:
-                    return float(signal['BT_PF'].replace('x', '')) if isinstance(signal['BT_PF'], str) else float(signal['BT_PF'])
-                except:
-                    pass
-            
-            # Try nested dict
-            bt = signal.get('backtest', {})
-            if bt:
-                return bt.get('profit_factor', 0)
-            
-            return 0
+        # ════════════════════════════════════════════════════════════════════
+        # FORMAT ROWS FOR GOOGLE SHEET
+        # ════════════════════════════════════════════════════════════════════
         
-        def get_confidence(signal):
-            """Get confidence from various possible column names"""
-            # Try different column name variations
-            for key in ['CONF', 'Confidence', 'confidence', 'Conf']:
-                if key in signal and signal[key] not in [None, '', 'N/A', 'nan']:
-                    try:
-                        conf = signal[key]
-                        # Remove % if present
-                        if isinstance(conf, str):
-                            conf = float(conf.replace('%', ''))
-                        else:
-                            conf = float(conf)
-                        # Handle decimal format (0.98 vs 98)
-                        return conf if conf > 1 else conf * 100
-                    except:
-                        pass
-            return 0
-        
-        # Filter signals with backtest data
-        backtest_validated = [s for s in signals_data if has_backtest_data(s)]
-        
-        if not backtest_validated:
-            # Fallback: use top 2 by confidence
-            logger.warning("⚠️  No backtest data found, falling back to top 2 by confidence")
-            sorted_signals = sorted(signals_data, key=lambda x: get_confidence(x), reverse=True)
-            top_2_signals = sorted_signals[:2]
-        else:
-            # Sort by: Win Rate > Profit Factor > Confidence
-            def get_sort_key(signal):
-                return (
-                    get_backtest_win_rate(signal),           # PRIMARY
-                    get_backtest_profit_factor(signal),      # SECONDARY
-                    get_confidence(signal)                    # TERTIARY
-                )
-            
-            sorted_signals = sorted(backtest_validated, key=get_sort_key, reverse=True)
-            top_2_signals = sorted_signals[:2]
-        
-        # Detailed logging
-        logger.info(f"📊 Total signals: {len(signals_data)}, selecting TOP 2 by Backtest Win Rate")
-        
-        if backtest_validated:
-            logger.info(f"✓ Found {len(backtest_validated)} signals with backtest validation")
-            logger.info("🏆 TOP 2 SELECTED FOR GOOGLE SHEETS:")
-            
-            for i, sig in enumerate(top_2_signals, 1):
-                ticker = sig.get('TICKER', sig.get('Ticker', 'N/A'))
-                side = sig.get('SIDE', sig.get('Side', sig.get('Signal', 'N/A')))
-                win_rate = get_backtest_win_rate(sig)
-                profit_factor = get_backtest_profit_factor(sig)
-                confidence = get_confidence(sig)
-                
-                logger.info(f"  #{i}: {ticker} ({side}) - "
-                          f"Win Rate: {win_rate:.1f}%, "
-                          f"Profit Factor: {profit_factor:.1f}x, "
-                          f"Confidence: {confidence:.1f}%")
-        else:
-            logger.warning("Using top 2 by confidence (no backtest data available)")
-        
-        # Format rows for Google Sheet
         rows_to_add = []
-        for signal in top_2_signals:
+        for signal in signals_to_upload:
             row = format_sheet_row(signal, tomorrow)
             if row:
                 rows_to_add.append(row)
-
-        logger.info(f"📝 Formatted {len(rows_to_add)} rows for Google Sheet (TOP 2 by Win Rate)")
+                logger.info(f"✅ Formatted: {row[0]} ({row[1]}) @ ₹{row[2]}")
+            else:
+                logger.warning(f"⚠️  Failed to format signal: {signal.get('ticker', 'UNKNOWN')}")
+        
+        if not rows_to_add:
+            logger.warning("⚠️  No rows formatted successfully")
+            return True
+        
+        # ════════════════════════════════════════════════════════════════════
+        # WRITE TO GOOGLE SHEET
+        # ════════════════════════════════════════════════════════════════════
         
         # Find the next empty row
         result = service.spreadsheets().values().get(
@@ -446,9 +389,7 @@ def update_google_sheet(signals_data):
         # Append the data
         range_to_update = f'{sheet_name}!A{next_row}:J{next_row + len(rows_to_add) - 1}'
         
-        body = {
-            'values': rows_to_add
-        }
+        body = {'values': rows_to_add}
         
         result = service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
@@ -458,10 +399,13 @@ def update_google_sheet(signals_data):
         ).execute()
         
         updated_cells = result.get('updatedCells', 0)
-        logger.info(f"✅ Successfully updated {updated_cells} cells in Google Sheet")
-        logger.info(f"✅ Added {len(rows_to_add)} new signals to rows {next_row}-{next_row + len(rows_to_add) - 1}")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"✅ SUCCESS: Updated {updated_cells} cells in Google Sheet")
+        logger.info(f"✅ Added {len(rows_to_add)} signals to rows {next_row}-{next_row + len(rows_to_add) - 1}")
+        logger.info(f"🔗 View: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
+        logger.info(f"{'='*70}\n")
         
-        # Optional: Format the sheet (add borders, colors, etc.)
+        # Optional: Format the sheet
         format_google_sheet(service, spreadsheet_id, sheet_name, next_row, len(rows_to_add))
         
         return True
@@ -471,8 +415,9 @@ def update_google_sheet(signals_data):
         return False
     except Exception as e:
         logger.error(f"❌ Error updating Google Sheet: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
-
 
 def format_google_sheet(service, spreadsheet_id, sheet_name, start_row, num_rows):
     """
@@ -5507,56 +5452,258 @@ def classify_signal_tier(result: Dict, backtest_result: Optional[BacktestResult]
 
 
 def select_top_2_stocks(results: list) -> list:
-    """Auto-select TOP 2 stocks by Backtest Win Rate"""
+    """
+    ✅ ENHANCED v2.0: Production-ready Top 2 selection using ALL quality metrics
+    
+    Selection Priority:
+    1. Tier (Tier-1 > Tier-2 > Tier-3)
+    2. Backtest Quality (WR, PF, Reliability)
+    3. Setup Type Historical Win Rate
+    4. Relative Strength vs Nifty
+    5. Trend Strength
+    6. Risk:Reward Ratio
+    7. LONG/SHORT Diversification
+    """
     
     print("\n" + "="*120)
-    print("🎯 AUTO TOP 2 STOCK SELECTION - BY BACKTEST WIN RATE")
+    print("🎯 ENHANCED TOP 2 SELECTION v2.0")
     print("="*120)
     
-    backtest_validated = [r for r in results if r.get('backtest_validated') and 'backtest' in r]
+    if not results or len(results) == 0:
+        print("❌ No signals to select from!")
+        return []
     
-    if not backtest_validated:
-        print("⚠️  No backtest data! Using top 2 by confidence...")
-        top_2 = results[:2]
-    else:
-        print(f"✓ Found {len(backtest_validated)} stocks with backtest data\n")
-        sorted_stocks = sorted(
-            backtest_validated,
-            key=lambda x: (
-                x.get('backtest', {}).get('win_rate', 0),
-                x.get('backtest', {}).get('profit_factor', 0),
-                x.get('confidence', 0)
-            ),
-            reverse=True
-        )
-        top_2 = sorted_stocks[:2]
+    print(f"\n📊 Input: {len(results)} total signals")
     
-    print("🏆 TOP 2 SELECTED:")
-    print("="*120)
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 1: APPLY TIER CLASSIFICATION
+    # ═══════════════════════════════════════════════════════════════════════
     
-    for i, stock in enumerate(top_2, 1):
+    print("\n[STEP 1] Applying Tier Classification...")
+    tiers = apply_tier_based_filtering(results)
+    
+    for tier_name, tier_list in tiers.items():
+        print(f"   {tier_name}: {len(tier_list)} signals")
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 2: COMPREHENSIVE QUALITY SCORING
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    print("\n[STEP 2] Calculating Comprehensive Quality Scores...")
+    
+    def calculate_composite_score(stock: dict) -> float:
+        """
+        Calculate comprehensive quality score (0-100)
+        Uses ALL available quality metrics
+        """
+        score = 0
+        max_score = 0
+        
+        # ────────────────────────────────────────
+        # TIER SCORE (max 25 points)
+        # ────────────────────────────────────────
+        max_score += 25
+        tier = stock.get('tier', 'TIER_3_SPECULATIVE')
+        if 'TIER_1' in str(tier) or 'PREMIUM' in str(tier).upper():
+            score += 25
+        elif 'TIER_2' in str(tier) or 'STANDARD' in str(tier).upper():
+            score += 15
+        else:
+            score += 5
+        
+        # ────────────────────────────────────────
+        # BACKTEST QUALITY (max 30 points)
+        # ────────────────────────────────────────
+        max_score += 30
         bt = stock.get('backtest', {})
-        print(f"\n#{i} {stock['ticker']} ({stock['side']})")
-        print(f"   Entry: ₹{stock['entry_price']:.2f} | SL: ₹{stock['stop_loss']:.2f} | T1: ₹{stock['target_1']:.2f} | T2: ₹{stock['target_2']:.2f}")
-        print(f"   R:R: {stock['risk_reward']:.1f}x | Qty: {stock['qty']} | Confidence: {stock['confidence']:.1f}%")
+        
+        if stock.get('backtest_validated') and bt:
+            # Win Rate (max 12 points)
+            wr = bt.get('win_rate', 0)
+            score += min(12, (wr - 50) * 0.4) if wr > 50 else 0
+            
+            # Profit Factor (max 10 points)
+            pf = bt.get('profit_factor', 0)
+            score += min(10, (pf - 1) * 5) if pf > 1 else 0
+            
+            # Reliability Score (max 8 points)
+            rel = bt.get('reliability_score', 0)
+            score += min(8, rel * 0.08)
+        
+        # ────────────────────────────────────────
+        # SETUP TYPE (max 10 points) - NEW!
+        # ────────────────────────────────────────
+        max_score += 10
+        setup_type = stock.get('setup_type', 'UNKNOWN')
+        setup_wr = stock.get('setup_historical_wr', 50)
+        
+        # Priority setups
+        setup_bonus = {
+            'VCP': 10,
+            'BREAKOUT': 8,
+            'SUPPORT_BOUNCE': 7,
+            'MOMENTUM': 6,
+            'EMA_BOUNCE': 5,
+            'RSI_REVERSAL': 4,
+            'GAP_PLAY': 3,
+            'UNKNOWN': 0
+        }
+        score += setup_bonus.get(setup_type, 0)
+        
+        # ────────────────────────────────────────
+        # RELATIVE STRENGTH (max 10 points) - NEW!
+        # ────────────────────────────────────────
+        max_score += 10
+        rs = stock.get('relative_strength', 100)
+        rs_interp = stock.get('rs_interpretation', 'NEUTRAL')
+        
+        if stock.get('side') == 'LONG':
+            if rs_interp == 'VERY_STRONG':
+                score += 10
+            elif rs_interp == 'STRONG':
+                score += 7
+            elif rs_interp == 'NEUTRAL':
+                score += 4
+        else:  # SHORT
+            if rs_interp == 'VERY_WEAK':
+                score += 10
+            elif rs_interp == 'WEAK':
+                score += 7
+            elif rs_interp == 'NEUTRAL':
+                score += 4
+        
+        # ────────────────────────────────────────
+        # TREND STRENGTH (max 10 points) - NEW!
+        # ────────────────────────────────────────
+        max_score += 10
+        trend = stock.get('trend_strength', 50)
+        score += min(10, trend * 0.1)
+        
+        # ────────────────────────────────────────
+        # RISK:REWARD (max 10 points)
+        # ────────────────────────────────────────
+        max_score += 10
+        rr = stock.get('risk_reward', 0)
+        score += min(10, rr * 3)
+        
+        # ────────────────────────────────────────
+        # CONFIDENCE (max 5 points)
+        # ────────────────────────────────────────
+        max_score += 5
+        conf = stock.get('confidence', 0)
+        score += min(5, (conf - 60) * 0.125) if conf > 60 else 0
+        
+        # Normalize to 0-100
+        return round((score / max_score) * 100, 1) if max_score > 0 else 0
+    
+    # Calculate scores for all signals
+    for result in results:
+        result['composite_score'] = calculate_composite_score(result)
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 3: SORT BY COMPOSITE SCORE
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    print("\n[STEP 3] Ranking by Composite Score...")
+    
+    sorted_results = sorted(results, key=lambda x: x.get('composite_score', 0), reverse=True)
+    
+    # Show top 5 for context
+    print(f"\n   TOP 5 BY COMPOSITE SCORE:")
+    print(f"   {'#':<3} {'Ticker':<10} {'Side':<6} {'Score':<8} {'Tier':<20} {'Setup':<15}")
+    print(f"   {'-'*70}")
+    
+    for i, stock in enumerate(sorted_results[:5], 1):
+        print(f"   {i:<3} {stock['ticker']:<10} {stock['side']:<6} "
+              f"{stock.get('composite_score', 0):<8.1f} "
+              f"{stock.get('tier', 'N/A'):<20} "
+              f"{stock.get('setup_type', 'N/A'):<15}")
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 4: APPLY DIVERSIFICATION (1 LONG + 1 SHORT IF POSSIBLE)
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    print("\n[STEP 4] Applying LONG/SHORT Diversification...")
+    
+    longs = [s for s in sorted_results if s.get('side') == 'LONG']
+    shorts = [s for s in sorted_results if s.get('side') == 'SHORT']
+    
+    print(f"   Available: {len(longs)} LONG, {len(shorts)} SHORT")
+    
+    if longs and shorts:
+        best_long = longs[0]
+        best_short = shorts[0]
+        top_2_same = sorted_results[:2]
+        
+        # Compare: diversified vs same-side
+        diversified_score = best_long.get('composite_score', 0) + best_short.get('composite_score', 0)
+        same_side_score = sum(s.get('composite_score', 0) for s in top_2_same)
+        
+        # Prefer diversification if within 15% quality
+        score_diff_pct = abs(same_side_score - diversified_score) / max(same_side_score, 1) * 100
+        
+        if score_diff_pct <= 15:
+            selected = [best_long, best_short]
+            selection_method = "DIVERSIFIED (1 LONG + 1 SHORT)"
+        else:
+            selected = top_2_same
+            selection_method = f"TOP 2 BY SCORE (diff: {score_diff_pct:.1f}%)"
+    else:
+        selected = sorted_results[:2]
+        selection_method = "TOP 2 (only one side available)"
+    
+    print(f"   ✅ Selection Method: {selection_method}")
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 5: FINAL OUTPUT
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    print(f"\n{'='*120}")
+    print(f"🏆 FINAL TOP 2 SELECTED")
+    print(f"{'='*120}")
+    
+    for i, stock in enumerate(selected, 1):
+        bt = stock.get('backtest', {})
+        
+        print(f"\n{'─'*120}")
+        print(f"#{i} {stock['ticker']} ({stock['side']}) - COMPOSITE SCORE: {stock.get('composite_score', 0):.1f}/100")
+        print(f"{'─'*120}")
+        
+        print(f"   📊 CLASSIFICATION:")
+        print(f"      Tier: {stock.get('tier', 'N/A')}")
+        print(f"      Setup Type: {stock.get('setup_type', 'N/A')}")
+        
+        print(f"\n   💰 PRICE LEVELS:")
+        print(f"      Entry: ₹{stock.get('entry_price', 0):.2f}")
+        print(f"      Stop Loss: ₹{stock.get('stop_loss', 0):.2f}")
+        print(f"      Target 1: ₹{stock.get('target_1', 0):.2f}")
+        print(f"      Target 2: ₹{stock.get('target_2', 0):.2f}")
+        
+        print(f"\n   📈 QUALITY METRICS:")
+        print(f"      Confidence: {stock.get('confidence', 0):.1f}%")
+        print(f"      R:R Ratio: {stock.get('risk_reward', 0):.1f}x")
+        print(f"      Trend Strength: {stock.get('trend_strength', 0):.0f}")
+        print(f"      Relative Strength: {stock.get('relative_strength', 0):.0f} ({stock.get('rs_interpretation', 'N/A')})")
+        
         if bt:
-            print(f"   ⭐ Win Rate: {bt.get('win_rate', 0):.1f}% | Profit Factor: {bt.get('profit_factor', 0):.1f}x")
+            print(f"\n   🔬 BACKTEST:")
+            print(f"      Win Rate: {bt.get('win_rate', 0):.1f}%")
+            print(f"      Profit Factor: {bt.get('profit_factor', 0):.2f}x")
+            print(f"      Reliability: {bt.get('reliability_score', 0):.1f}/100")
     
-    print("\n💰 POSITION SIZING (₹10,000 capital):")
-    for i, stock in enumerate(top_2, 1):
-        shares = int(5000 / stock['entry_price'])
-        cost = shares * stock['entry_price']
-        max_loss = shares * abs(stock['entry_price'] - stock['stop_loss'])
-        print(f"  #{i} {stock['ticker']}: Buy {shares} @ ₹{stock['entry_price']:.2f} = ₹{cost:.2f} (Risk: ₹{max_loss:.2f})")
+    print(f"\n{'='*120}\n")
     
-    print("="*120 + "\n")
-    return top_2
-
+    return selected
 
 def export_top_2_files(top_2: list, signals_dir: str, timestamp: str):
-    """Export TOP 2 to txt and csv files"""
+    """
+    Export TOP 2 to txt and csv files
+    ✅ FIXED: Includes ALL columns needed by Google Sheets
+    ✅ FIXED: Column names match what format_sheet_row() expects
+    """
     import csv
     
+    # TXT File (human readable)
     txt_file = os.path.join(signals_dir, f"TOP_2_PICKS_{timestamp}.txt")
     with open(txt_file, 'w', encoding='utf-8') as f:
         f.write(f"🎯 TOP 2 PICKS - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -5564,32 +5711,86 @@ def export_top_2_files(top_2: list, signals_dir: str, timestamp: str):
         for i, s in enumerate(top_2, 1):
             bt = s.get('backtest', {})
             f.write(f"#{i} {s['ticker']} ({s['side']})\n")
+            f.write(f"  Tier: {s.get('tier', 'N/A')}\n")
             f.write(f"  Entry: ₹{s['entry_price']:.2f} | SL: ₹{s['stop_loss']:.2f}\n")
             f.write(f"  T1: ₹{s['target_1']:.2f} | T2: ₹{s['target_2']:.2f}\n")
             f.write(f"  Confidence: {s['confidence']:.1f}%")
             if bt:
-                f.write(f" | Win Rate: {bt.get('win_rate', 0):.1f}%\n")
+                f.write(f" | Win Rate: {bt.get('win_rate', 0):.1f}%")
+                f.write(f" | PF: {bt.get('profit_factor', 0):.2f}x")
+            f.write(f"\n  Setup: {s.get('setup_type', 'N/A')}")
+            f.write(f" | Trend: {s.get('trend_strength', 0):.0f}")
+            f.write(f" | RS: {s.get('relative_strength', 0):.0f}")
             f.write("\n" + "─"*80 + "\n\n")
     
+    # CSV File - ✅ FIXED: Use exact column names that format_sheet_row() expects
     csv_file = os.path.join(signals_dir, f"TOP_2_PICKS_{timestamp}.csv")
-    with open(csv_file, 'w', newline='') as csvfile:
+    with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Rank', 'Ticker', 'Side', 'Entry', 'SL', 'T1', 'T2', 'Confidence', 'BT_WR', 'BT_PF'])
+        
+        # ✅ FIXED: Column names now match what update_google_sheet() expects
+        writer.writerow([
+            'Rank',
+            'ticker',          # ✅ lowercase
+            'side',            # ✅ lowercase  
+            'price',           # ✅ lowercase 'price' not 'Entry'
+            'entry_price',     # ✅ explicit entry_price
+            'stop_loss',       # ✅ full name
+            'target_1',        # ✅ full name
+            'target_2',        # ✅ full name
+            'confidence',      # ✅ lowercase
+            'risk_reward',     # ✅ added
+            'qty',             # ✅ added
+            'tier',            # ✅ ADDED - critical for ranking
+            'setup_type',      # ✅ ADDED
+            'trend_strength',  # ✅ ADDED
+            'relative_strength', # ✅ ADDED
+            'BT_WR',           # Backtest Win Rate
+            'BT_PF',           # Backtest Profit Factor
+            'BT_Sharpe',       # ✅ ADDED
+            'BT_MaxDD',        # ✅ ADDED
+            'BT_Reliability',  # ✅ ADDED
+            'backtest_validated'  # ✅ ADDED
+        ])
+        
         for i, s in enumerate(top_2, 1):
             bt = s.get('backtest', {})
+            
             writer.writerow([
-                i, s['ticker'], s['side'], 
-                f"{s['entry_price']:.2f}", f"{s['stop_loss']:.2f}",
-                f"{s['target_1']:.2f}", f"{s['target_2']:.2f}",
-                f"{s['confidence']:.1f}",
-                f"{bt.get('win_rate', 0):.1f}" if bt else "N/A"
+                i,
+                s.get('ticker', ''),
+                s.get('side', ''),
+                s.get('price', s.get('entry_price', 0)),
+                s.get('entry_price', 0),
+                s.get('stop_loss', 0),
+                s.get('target_1', 0),
+                s.get('target_2', 0),
+                s.get('confidence', 0),
+                s.get('risk_reward', 0),
+                s.get('qty', 0),
+                s.get('tier', 'UNKNOWN'),
+                s.get('setup_type', 'UNKNOWN'),
+                s.get('trend_strength', 0),
+                s.get('relative_strength', 0),
+                bt.get('win_rate', 0) if bt else 0,
+                bt.get('profit_factor', 0) if bt else 0,
+                bt.get('sharpe_ratio', 0) if bt else 0,
+                bt.get('max_drawdown', 0) if bt else 0,
+                bt.get('reliability_score', 0) if bt else 0,
+                'True' if s.get('backtest_validated') else 'False'
             ])
     
-    print(f"✅ TOP 2 files: {txt_file}, {csv_file}\n")
+    print(f"✅ TOP 2 files exported:")
+    print(f"   📄 TXT: {txt_file}")
+    print(f"   📄 CSV: {csv_file}")
+    
     return txt_file, csv_file
 
+
 def apply_tier_based_filtering(results: List[Dict]) -> Dict[str, List[Dict]]:
-    """Separate results into tiers"""
+    """
+    ✅ ENHANCED: Separate results into tiers AND add 'tier' key to each result
+    """
     
     tiers = {
         "TIER_1_PREMIUM": [],
@@ -5625,10 +5826,12 @@ def apply_tier_based_filtering(results: List[Dict]) -> Dict[str, List[Dict]]:
         tier = classify_signal_tier(result, backtest)
         
         if tier in tiers:
-            result['tier'] = tier
+            result['tier'] = tier  # ✅ CRITICAL: Add tier key to result
             tiers[tier].append(result)
     
     return tiers
+
+
 def main():
     """Main execution function - FIXED VERSION WITH VALIDATION"""
     
