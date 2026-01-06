@@ -5993,17 +5993,27 @@ def github_actions_main():
                 # ============================================================
                 # 🆕 GOOGLE SHEETS UPDATE - THIS IS THE NEW SECTION!
                 # ============================================================
-                # ============================================================
-                # ✅ GOOGLE SHEETS UPDATE - DISABLED (Already done in export_results)
-                # ============================================================
-                # NOTE: Google Sheets update happens in export_results() via select_top_2_stocks()
-                # No need to update here again - would create duplicates!
-                
-                logger.info("="*80)
-                logger.info("📊 Google Sheet already updated in export phase")
-                logger.info(f"🔗 View your sheet: https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_CONFIG['spreadsheet_id']}")
-                logger.info("="*80)
-                # ============================================================
+                if csv_file and GOOGLE_SHEETS_CONFIG['enabled']:
+                    logger.info("="*80)
+                    logger.info("📊 UPDATING GOOGLE SHEET...")
+                    logger.info("="*80)
+                    
+                    # Read signals from CSV
+                    signals_data = read_signals_from_csv(csv_file)
+                    
+                    if signals_data:
+                        # Update Google Sheet
+                        success = update_google_sheet(signals_data)
+                        
+                        if success:
+                            logger.info("✅ Google Sheet updated successfully!")
+                            logger.info(f"🔗 View your sheet: https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_CONFIG['spreadsheet_id']}")
+                        else:
+                            logger.error("❌ Failed to update Google Sheet")
+                    else:
+                        logger.warning("⚠️  No signals to update in Google Sheet")
+                    
+                    logger.info("="*80)
                 # ============================================================
                 
             else:
