@@ -119,7 +119,7 @@ def get_google_sheets_service():
 
 def format_sheet_row(signal_data, entry_date):
     """
-    Format a single signal into a row for Google Sheets
+    Format a single signal into a row for Google Sheets - FIXED VERSION
     Columns: Ticker, Position, Entry_Price, Quantity, Stop_Loss, Target_1, Target_2, Entry_Date, Status, Notes
     
     Args:
@@ -130,17 +130,22 @@ def format_sheet_row(signal_data, entry_date):
         List of values for the row
     """
     try:
-        # Extract values from signal_data with CORRECT column names from your CSV
-        ticker = signal_data.get('TICKER', signal_data.get('Ticker', 'N/A'))
+        # DEBUG: Print what columns we actually have
+        logger.info(f"DEBUG - Available columns: {list(signal_data.keys())}")
+        
+        # Extract ticker - try multiple possible column names
+        ticker = signal_data.get('ticker', signal_data.get('Ticker', signal_data.get('TICKER', 'N/A')))
         
         # Position (LONG/SHORT) - Try multiple possible column names
-        position = (signal_data.get('Side', '') or 
+        position = (signal_data.get('side', '') or              # ← MOST IMPORTANT: lowercase!
+                   signal_data.get('Side', '') or 
                    signal_data.get('Signal', '') or 
                    signal_data.get('Position', 'N/A'))
         
         # Entry Price - Try multiple possible column names
-        entry_price = (signal_data.get('Price', 0) or 
-                      signal_data.get('CMP', 0) or 
+        entry_price = (signal_data.get('price', 0) or          # ← MOST IMPORTANT: lowercase!
+                      signal_data.get('entry_price', 0) or     # ← Second priority
+                      signal_data.get('Price', 0) or 
                       signal_data.get('Entry_Price', 0) or
                       signal_data.get('ENTRY', 0))
         
@@ -154,7 +159,8 @@ def format_sheet_row(signal_data, entry_date):
                 entry_price = 0
         
         # Stop Loss - Try multiple possible column names
-        stop_loss = (signal_data.get('StopLoss', 0) or 
+        stop_loss = (signal_data.get('stop_loss', 0) or        # ← MOST IMPORTANT: lowercase!
+                    signal_data.get('StopLoss', 0) or 
                     signal_data.get('Stop_Loss', 0) or 
                     signal_data.get('STOP_LOSS', 0))
         
@@ -166,7 +172,8 @@ def format_sheet_row(signal_data, entry_date):
                 stop_loss = 0
         
         # Target 1 - Try multiple possible column names
-        target_1 = (signal_data.get('Target1', 0) or 
+        target_1 = (signal_data.get('target_1', 0) or          # ← MOST IMPORTANT: lowercase!
+                   signal_data.get('Target1', 0) or 
                    signal_data.get('Target_1', 0) or 
                    signal_data.get('TARGET_1', 0))
         
@@ -178,7 +185,8 @@ def format_sheet_row(signal_data, entry_date):
                 target_1 = 0
         
         # Target 2 - Try multiple possible column names
-        target_2 = (signal_data.get('Target2', 0) or 
+        target_2 = (signal_data.get('target_2', 0) or          # ← MOST IMPORTANT: lowercase!
+                   signal_data.get('Target2', 0) or 
                    signal_data.get('Target_2', 0) or 
                    signal_data.get('TARGET_2', 0))
         
@@ -193,7 +201,7 @@ def format_sheet_row(signal_data, entry_date):
         quantity = int(10000 / entry_price) if entry_price > 0 else 0
         
         # Get Confidence and R:R
-        confidence = signal_data.get('CONF', signal_data.get('Confidence', 0))
+        confidence = signal_data.get('confidence', signal_data.get('Confidence', signal_data.get('CONF', 0)))
         
         # Handle confidence if it's a percentage string like "98.4%"
         if isinstance(confidence, str):
@@ -204,7 +212,7 @@ def format_sheet_row(signal_data, entry_date):
                 confidence = 0
         
         # Get R:R ratio
-        rr_ratio = signal_data.get('R:R', signal_data.get('RR', signal_data.get('R_R', 0)))
+        rr_ratio = signal_data.get('risk_reward', signal_data.get('RiskReward', signal_data.get('R:R', signal_data.get('RR', 0))))
         
         # Handle R:R if it's a string like "1.9x"
         if isinstance(rr_ratio, str):
@@ -5574,8 +5582,7 @@ def export_top_2_files(top_2: list, signals_dir: str, timestamp: str):
                 f"{s['entry_price']:.2f}", f"{s['stop_loss']:.2f}",
                 f"{s['target_1']:.2f}", f"{s['target_2']:.2f}",
                 f"{s['confidence']:.1f}",
-                f"{bt.get('win_rate', 0):.1f}" if bt else "N/A",
-                f"{bt.get('profit_factor', 0):.1f}" if bt else "N/A"
+                f"{bt.get('win_rate', 0):.1f}" if bt else "N/A"
             ])
     
     print(f"✅ TOP 2 files: {txt_file}, {csv_file}\n")
