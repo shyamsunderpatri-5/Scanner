@@ -5999,54 +5999,27 @@ def select_top_2_stocks(results: list) -> list:
     # STEP 4: APPLY DIVERSIFICATION (1 LONG + 1 SHORT IF POSSIBLE)
     # ═══════════════════════════════════════════════════════════════════════
 
-    print("\n[STEP 4] Applying LONG/SHORT Diversification...")
+    print("\n[STEP 4] Selecting Top 2 by Quality Score...")
 
-    longs = [s for s in sorted_results if s.get('side') == 'LONG']
-    shorts = [s for s in sorted_results if s.get('side') == 'SHORT']
-
-    print(f"   Available: {len(longs)} LONG, {len(shorts)} SHORT")
-
-    # 🆕 HARD DIRECTIONAL EXPOSURE RULE
-    MAX_SAME_SIDE = 1  # Maximum signals in same direction
-
-    if longs and shorts:
-        best_long = longs[0]
-        best_short = shorts[0]
-        top_2_same = sorted_results[:2]
+    # 🎯 SIMPLE: ALWAYS SELECT TOP 2 BY SCORE (NO DIVERSIFICATION LOGIC)
+    selected = sorted_results[:2]
+    
+    # Log the selection
+    if len(selected) >= 2:
+        side_1 = selected[0].get('side', 'N/A')
+        side_2 = selected[1].get('side', 'N/A')
         
-        # Check if top 2 are same direction
-        same_direction = (top_2_same[0].get('side') == top_2_same[1].get('side'))
-        
-        # Compare: diversified vs same-side
-        diversified_score = best_long.get('composite_score', 0) + best_short.get('composite_score', 0)
-        same_side_score = sum(s.get('composite_score', 0) for s in top_2_same)
-        
-        # 🚨 ENFORCEMENT: If top 2 are same side AND quality difference is small, FORCE diversification
-        score_diff_pct = abs(same_side_score - diversified_score) / max(same_side_score, 1) * 100
-        
-        if same_direction and score_diff_pct <= 20:  # Within 20% quality
-            selected = [best_long, best_short]
-            selection_method = f"DIVERSIFIED (FORCED) - Same-side diff only {score_diff_pct:.1f}%"
-            logger.info(f"✅ DIRECTIONAL CONTROL: Forced 1L+1S to limit directional risk")
-        elif score_diff_pct <= 15:  # Original logic
-            selected = [best_long, best_short]
-            selection_method = "DIVERSIFIED (1 LONG + 1 SHORT)"
+        if side_1 == side_2:
+            selection_method = f"TOP 2 BY QUALITY (Both {side_1})"
+            print(f"   📊 Selection: Best 2 stocks by score (Both {side_1} positions)")
+            logger.info(f"✅ QUALITY-FIRST: Selected top 2 by score - {selected[0]['ticker']} + {selected[1]['ticker']}")
         else:
-            selected = top_2_same
-            selection_method = f"TOP 2 BY SCORE (large quality gap: {score_diff_pct:.1f}%)"
-            
-            # Log warning if both same direction
-            if same_direction:
-                logger.warning(f"⚠️  Both selected trades are {top_2_same[0].get('side')} - concentrated directional risk!")
+            selection_method = f"TOP 2 BY QUALITY (1 {side_1} + 1 {side_2})"
+            print(f"   📊 Selection: Best 2 stocks by score (Naturally diversified: 1L+1S)")
+            logger.info(f"✅ QUALITY-FIRST: Selected top 2 by score - {selected[0]['ticker']} + {selected[1]['ticker']}")
     else:
-        selected = sorted_results[:2]
-        selection_method = "TOP 2 (only one side available)"
-        
-        # Warn about unbalanced exposure
-        same_direction = (selected[0].get('side') == selected[1].get('side'))
-        if same_direction:
-            logger.warning(f"⚠️  UNBALANCED: Both trades are {selected[0].get('side')} - no opposing hedge!")
-
+        selection_method = "TOP 2 BY QUALITY"
+    
     print(f"   ✅ Selection Method: {selection_method}")
     
     # ═══════════════════════════════════════════════════════════════════════
