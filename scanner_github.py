@@ -5962,10 +5962,16 @@ def github_actions_main():
             html_file = None
             
             if os.path.exists(signals_dir):
+                top_2_files = sorted([f for f in os.listdir(signals_dir) 
+                                     if f.startswith('TOP_2_PICKS') and f.endswith('.csv')])
                 csv_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.csv')])
                 html_files = sorted([f for f in os.listdir(signals_dir) if f.endswith('.html')])
                 
-                if csv_files:
+                # Use TOP_2_PICKS file if available (contains the actual top 2 by win rate)
+                if top_2_files:
+                    csv_file = os.path.join(signals_dir, top_2_files[-1])
+                    logger.info(f"📄 Found TOP_2_PICKS CSV (will use for Google Sheets): {csv_file}")
+                elif csv_files:
                     csv_file = os.path.join(signals_dir, csv_files[-1])
                     logger.info(f"📄 Found CSV: {csv_file}")
                 
