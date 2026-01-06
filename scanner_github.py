@@ -145,7 +145,7 @@ def format_sheet_row(signal_data, entry_date):
         # Entry Price - Try multiple possible column names
         entry_price = (signal_data.get('price', 0) or          # ← MOST IMPORTANT: lowercase!
                       signal_data.get('entry_price', 0) or     # ← Second priority
-                      signal_data.get('Price', 0) or 
+                      signal_data.get('Entry', 0) or 
                       signal_data.get('Entry_Price', 0) or
                       signal_data.get('ENTRY', 0))
         
@@ -160,7 +160,7 @@ def format_sheet_row(signal_data, entry_date):
         
         # Stop Loss - Try multiple possible column names
         stop_loss = (signal_data.get('stop_loss', 0) or        # ← MOST IMPORTANT: lowercase!
-                    signal_data.get('StopLoss', 0) or 
+                    signal_data.get('SL', 0) or 
                     signal_data.get('Stop_Loss', 0) or 
                     signal_data.get('STOP_LOSS', 0))
         
@@ -173,7 +173,7 @@ def format_sheet_row(signal_data, entry_date):
         
         # Target 1 - Try multiple possible column names
         target_1 = (signal_data.get('target_1', 0) or          # ← MOST IMPORTANT: lowercase!
-                   signal_data.get('Target1', 0) or 
+                   signal_data.get('T1', 0) or 
                    signal_data.get('Target_1', 0) or 
                    signal_data.get('TARGET_1', 0))
         
@@ -186,7 +186,7 @@ def format_sheet_row(signal_data, entry_date):
         
         # Target 2 - Try multiple possible column names
         target_2 = (signal_data.get('target_2', 0) or          # ← MOST IMPORTANT: lowercase!
-                   signal_data.get('Target2', 0) or 
+                   signal_data.get('T2', 0) or 
                    signal_data.get('Target_2', 0) or 
                    signal_data.get('TARGET_2', 0))
         
