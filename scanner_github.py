@@ -5566,7 +5566,7 @@ def export_top_2_files(top_2: list, signals_dir: str, timestamp: str):
     csv_file = os.path.join(signals_dir, f"TOP_2_PICKS_{timestamp}.csv")
     with open(csv_file, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Rank', 'Ticker', 'Side', 'Entry', 'SL', 'T1', 'T2', 'Confidence', 'WinRate'])
+        writer.writerow(['Rank', 'Ticker', 'Side', 'Entry', 'SL', 'T1', 'T2', 'Confidence', 'BT_WR', 'BT_PF'])
         for i, s in enumerate(top_2, 1):
             bt = s.get('backtest', {})
             writer.writerow([
@@ -5574,7 +5574,8 @@ def export_top_2_files(top_2: list, signals_dir: str, timestamp: str):
                 f"{s['entry_price']:.2f}", f"{s['stop_loss']:.2f}",
                 f"{s['target_1']:.2f}", f"{s['target_2']:.2f}",
                 f"{s['confidence']:.1f}",
-                f"{bt.get('win_rate', 0):.1f}" if bt else "N/A"
+                f"{bt.get('win_rate', 0):.1f}" if bt else "N/A",
+                f"{bt.get('profit_factor', 0):.1f}" if bt else "N/A"
             ])
     
     print(f"✅ TOP 2 files: {txt_file}, {csv_file}\n")
