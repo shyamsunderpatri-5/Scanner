@@ -251,21 +251,8 @@ def format_sheet_row(signal_data, entry_date):
 
 
 def update_google_sheet(signals_data):
-    """
-    Update Google Sheet with trading signals
+    """Update Google Sheet with trading signals - PRODUCTION HARDENED v4.0"""
     
-    ✅ FIXED v3.0:
-    - Trusts pre-selected Top 2 from select_top_2_stocks()
-    - No redundant re-selection
-    - Proper column name handling
-    - Enhanced logging
-    
-    Args:
-        signals_data: List of dictionaries from CSV (should be exactly 2 stocks)
-    
-    Returns:
-        Boolean indicating success or failure
-    """
     try:
         if not GOOGLE_SHEETS_CONFIG['enabled']:
             logger.info("Google Sheets update skipped (disabled)")
@@ -292,12 +279,32 @@ def update_google_sheet(signals_data):
         logger.info(f"📥 Received {len(signals_data)} signals from CSV")
         
         # ════════════════════════════════════════════════════════════════════
-        # VALIDATE INPUT
+        # 🆕 CRITICAL: HARD CONTRACT ENFORCEMENT
         # ════════════════════════════════════════════════════════════════════
         
+        # Validate input count
         if not signals_data:
             logger.warning("⚠️  No signals received - nothing to update")
             return True
+        
+        # 🚨 ENFORCEMENT POINT #1: Exactly 2 signals required
+        if len(signals_data) != 2:
+            logger.critical(f"❌ CONTRACT VIOLATION: Expected exactly 2 signals, got {len(signals_data)}")
+            logger.critical(f"❌ This indicates upstream select_top_2_stocks() failed!")
+            logger.critical(f"❌ REFUSING to upload - manual review required")
+            
+            # Log what we received for debugging
+            for i, sig in enumerate(signals_data, 1):
+                ticker = sig.get('ticker', sig.get('Ticker', 'N/A'))
+                logger.critical(f"   Signal #{i}: {ticker}")
+            
+            return False  # HARD STOP - do not proceed
+        
+        logger.info("✅ CONTRACT CHECK PASSED: Exactly 2 signals received")
+        
+        # ════════════════════════════════════════════════════════════════════
+        # VALIDATE INPUT
+        # ════════════════════════════════════════════════════════════════════
         
         # Log what we received
         logger.info(f"\n{'='*70}")
@@ -314,6 +321,65 @@ def update_google_sheet(signals_data):
             logger.info(f"  #{i}: {ticker} | {side} | Tier: {tier} | Conf: {conf}% | BT_WR: {bt_wr}%")
         
         logger.info(f"{'='*70}\n")
+
+
+        # ════════════════════════════════════════════════════════════════════
+        # 🆕 CRITICAL: TIER VALIDATION
+        # ════════════════════════════════════════════════════════════════════
+
+        TIER_1_PREMIUM = 'TIER_1_PREMIUM'
+        TIER_2_STANDARD = 'TIER_2_STANDARD'
+        TIER_3_SPECULATIVE = 'TIER_3_SPECULATIVE'
+
+        allowed_tiers = {TIER_1_PREMIUM, TIER_2_STANDARD}
+
+        for i, sig in enumerate(signals_data, 1):
+            tier = sig.get('tier', sig.get('Tier', 'UNKNOWN'))
+            ticker = sig.get('ticker', sig.get('Ticker', 'N/A'))
+            
+            # 🚨 ENFORCEMENT: Only Tier 1 & 2 allowed
+            if tier not in allowed_tiers:
+                logger.critical(f"❌ TIER VIOLATION: Signal #{i} ({ticker}) has Tier: {tier}")
+                logger.critical(f"❌ Only {allowed_tiers} are allowed for production trading")
+                logger.critical(f"❌ REFUSING to upload - Tier-3 detected!")
+                return False
+
+        logger.info("✅ TIER VALIDATION PASSED: All signals are Tier-1 or Tier-2")
+
+        # ════════════════════════════════════════════════════════════════════
+        # 🆕 CRITICAL: BACKTEST INTEGRITY CHECK
+        # ════════════════════════════════════════════════════════════════════
+
+        MIN_BACKTEST_WR = 55  # Minimum acceptable win rate
+        MIN_BACKTEST_PF = 1.2  # Minimum acceptable profit factor
+
+        for i, sig in enumerate(signals_data, 1):
+            ticker = sig.get('ticker', sig.get('Ticker', 'N/A'))
+            bt_validated = sig.get('backtest_validated', False)
+            bt_wr = sig.get('BT_WR', 0)
+            bt_pf = sig.get('BT_PF', 0)
+            
+            # 🚨 ENFORCEMENT: Backtest must exist and meet standards
+            if not bt_validated:
+                logger.critical(f"❌ BACKTEST FAILURE: Signal #{i} ({ticker}) has NO validated backtest")
+                logger.critical(f"❌ All production trades MUST have backtest validation")
+                logger.critical(f"❌ REFUSING to upload - backtest integrity compromised!")
+                return False
+            
+            if bt_wr < MIN_BACKTEST_WR:
+                logger.critical(f"❌ BACKTEST QUALITY FAILURE: {ticker} WR={bt_wr}% (min: {MIN_BACKTEST_WR}%)")
+                logger.critical(f"❌ Signal does not meet minimum win rate standard")
+                logger.critical(f"❌ REFUSING to upload - inadequate backtest performance!")
+                return False
+            
+            if bt_pf < MIN_BACKTEST_PF:
+                logger.critical(f"❌ BACKTEST QUALITY FAILURE: {ticker} PF={bt_pf}x (min: {MIN_BACKTEST_PF}x)")
+                logger.critical(f"❌ Signal does not meet minimum profit factor standard")
+                logger.critical(f"❌ REFUSING to upload - inadequate backtest performance!")
+                return False
+
+        logger.info("✅ BACKTEST INTEGRITY CHECK PASSED: All signals have validated, high-quality backtests")
+        logger.info(f"   Min Standards: WR ≥ {MIN_BACKTEST_WR}%, PF ≥ {MIN_BACKTEST_PF}x")
         
         # ════════════════════════════════════════════════════════════════════
         # ENSURE HEADERS EXIST
@@ -347,14 +413,13 @@ def update_google_sheet(signals_data):
             return False
         
         # ════════════════════════════════════════════════════════════════════
-        # ✅ TAKE TOP 2 AS-IS (NO RE-SELECTION!)
+        # ✅ TAKE TOP 2 AS-IS (ALREADY VALIDATED ABOVE)
         # ════════════════════════════════════════════════════════════════════
         
-        # The signals are already pre-selected by select_top_2_stocks()
-        # Just take the first 2 (or all if less than 2)
-        signals_to_upload = signals_data[:2]
+        # The signals are already pre-selected and validated
+        signals_to_upload = signals_data  # All 2 of them
         
-        logger.info(f"✅ Using {len(signals_to_upload)} pre-selected signals (no re-ranking)")
+        logger.info(f"✅ Using {len(signals_to_upload)} validated signals")
         
         # ════════════════════════════════════════════════════════════════════
         # FORMAT ROWS FOR GOOGLE SHEET
@@ -372,6 +437,12 @@ def update_google_sheet(signals_data):
         if not rows_to_add:
             logger.warning("⚠️  No rows formatted successfully")
             return True
+        
+        # 🚨 ENFORCEMENT POINT #2: Verify formatting didn't lose signals
+        if len(rows_to_add) != 2:
+            logger.critical(f"❌ FORMATTING ERROR: Started with 2 signals, formatted {len(rows_to_add)}")
+            logger.critical(f"❌ REFUSING to upload incomplete data")
+            return False
         
         # ════════════════════════════════════════════════════════════════════
         # WRITE TO GOOGLE SHEET
@@ -418,6 +489,158 @@ def update_google_sheet(signals_data):
         import traceback
         logger.error(traceback.format_exc())
         return False
+def final_trade_gate(signals: list) -> tuple:
+    """
+    🚨 ULTIMATE GATEKEEPER - Final validation before ANY execution
+    
+    This is the LAST line of defense before real money is at risk.
+    All execution paths (Google Sheets, Email, API, etc.) MUST call this first.
+    
+    Args:
+        signals: List of signal dictionaries to validate
+    
+    Returns:
+        tuple: (passed: bool, reason: str)
+            - passed: True if all checks pass, False otherwise
+            - reason: Detailed explanation of pass/fail
+    """
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # CHECK 1: EXACT COUNT
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    if not signals:
+        return False, "EMPTY: No signals provided"
+    
+    if len(signals) != 2:
+        return False, f"COUNT VIOLATION: Expected 2 signals, got {len(signals)}"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # CHECK 2: TIER VALIDATION
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    ALLOWED_TIERS = {'TIER_1_PREMIUM', 'TIER_2_STANDARD'}
+    
+    for i, sig in enumerate(signals, 1):
+        ticker = sig.get('ticker', sig.get('Ticker', 'UNKNOWN'))
+        tier = sig.get('tier', sig.get('Tier', 'UNKNOWN'))
+        
+        if tier not in ALLOWED_TIERS:
+            return False, f"TIER VIOLATION: Signal #{i} ({ticker}) is {tier}. Only {ALLOWED_TIERS} allowed."
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # CHECK 3: BACKTEST VALIDATION
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    MIN_WR = 55
+    MIN_PF = 1.2
+    
+    for i, sig in enumerate(signals, 1):
+        ticker = sig.get('ticker', sig.get('Ticker', 'UNKNOWN'))
+        bt_validated = sig.get('backtest_validated', False)
+        bt_wr = sig.get('BT_WR', 0)
+        bt_pf = sig.get('BT_PF', 0)
+        
+        if not bt_validated:
+            return False, f"BACKTEST MISSING: Signal #{i} ({ticker}) has no validated backtest"
+        
+        if bt_wr < MIN_WR:
+            return False, f"BACKTEST WR LOW: {ticker} WR={bt_wr}% (minimum {MIN_WR}%)"
+        
+        if bt_pf < MIN_PF:
+            return False, f"BACKTEST PF LOW: {ticker} PF={bt_pf}x (minimum {MIN_PF}x)"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # CHECK 4: PRICE LEVELS SANITY
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    for i, sig in enumerate(signals, 1):
+        ticker = sig.get('ticker', sig.get('Ticker', 'UNKNOWN'))
+        entry = sig.get('entry_price', sig.get('price', 0))
+        sl = sig.get('stop_loss', 0)
+        t1 = sig.get('target_1', 0)
+        t2 = sig.get('target_2', 0)
+        side = sig.get('side', sig.get('Side', 'UNKNOWN'))
+        
+        # Basic sanity checks
+        if entry <= 0:
+            return False, f"INVALID PRICE: {ticker} entry price is {entry}"
+        
+        if sl <= 0:
+            return False, f"INVALID SL: {ticker} stop loss is {sl}"
+        
+        if side == 'LONG':
+            if sl >= entry:
+                return False, f"INVALID LONG SETUP: {ticker} SL ({sl}) >= Entry ({entry})"
+            if t1 <= entry:
+                return False, f"INVALID LONG TARGET: {ticker} T1 ({t1}) <= Entry ({entry})"
+        elif side == 'SHORT':
+            if sl <= entry:
+                return False, f"INVALID SHORT SETUP: {ticker} SL ({sl}) <= Entry ({entry})"
+            if t1 >= entry:
+                return False, f"INVALID SHORT TARGET: {ticker} T1 ({t1}) >= Entry ({entry})"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # CHECK 5: RISK LIMITS
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    MAX_RISK_PER_TRADE = 5.0  # 5% max risk per trade
+    
+    for i, sig in enumerate(signals, 1):
+        ticker = sig.get('ticker', sig.get('Ticker', 'UNKNOWN'))
+        entry = sig.get('entry_price', sig.get('price', 0))
+        sl = sig.get('stop_loss', 0)
+        side = sig.get('side', sig.get('Side', 'UNKNOWN'))
+        
+        # Calculate risk percentage
+        if side == 'LONG':
+            risk_pct = ((entry - sl) / entry) * 100
+        else:  # SHORT
+            risk_pct = ((sl - entry) / entry) * 100
+        
+        if risk_pct > MAX_RISK_PER_TRADE:
+            return False, f"EXCESSIVE RISK: {ticker} risk is {risk_pct:.1f}% (max {MAX_RISK_PER_TRADE}%)"
+        
+        if risk_pct < 0.5:
+            return False, f"INSUFFICIENT RISK: {ticker} risk is {risk_pct:.1f}% (too tight SL)"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # ALL CHECKS PASSED
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    signal_summary = ", ".join([f"{s.get('ticker', 'N/A')} ({s.get('side', 'N/A')})" for s in signals])
+    return True, f"ALL CHECKS PASSED: {signal_summary}"
+
+
+def update_google_sheet_with_gatekeeper(signals_data):
+    """
+    WRAPPER: Update Google Sheet with final gatekeeper validation
+    
+    Use this instead of calling update_google_sheet() directly
+    """
+    
+    # 🚨 FINAL GATEKEEPER CHECK
+    passed, reason = final_trade_gate(signals_data)
+    
+    if not passed:
+        logger.critical("="*80)
+        logger.critical("🚨 FINAL TRADE GATE BLOCKED EXECUTION")
+        logger.critical("="*80)
+        logger.critical(f"Reason: {reason}")
+        logger.critical("Signals were rejected at the final validation stage")
+        logger.critical("Manual review required before proceeding")
+        logger.critical("="*80)
+        return False
+    
+    logger.info("="*80)
+    logger.info("✅ FINAL TRADE GATE: ALL VALIDATIONS PASSED")
+    logger.info("="*80)
+    logger.info(f"Validation: {reason}")
+    logger.info("Proceeding with Google Sheet update...")
+    logger.info("="*80)
+    
+    # If gatekeeper passes, proceed with normal update
+    return update_google_sheet(signals_data)
 
 def format_google_sheet(service, spreadsheet_id, sheet_name, start_row, num_rows):
     """
@@ -5450,6 +5673,101 @@ def classify_signal_tier(result: Dict, backtest_result: Optional[BacktestResult]
     return "REJECTED"
 
 
+def detect_market_regime(nifty_data: pd.DataFrame) -> str:
+    """
+    Detect current market regime for adaptive filtering
+    
+    Returns:
+        'TRENDING_UP', 'TRENDING_DOWN', 'RANGE_BOUND', or 'HIGH_VOLATILITY'
+    """
+    try:
+        if nifty_data is None or len(nifty_data) < 50:
+            logger.warning("Insufficient Nifty data for regime detection - defaulting to RANGE_BOUND")
+            return 'RANGE_BOUND'
+        
+        # Calculate indicators
+        close = nifty_data['Close']
+        sma_20 = close.rolling(window=20).mean()
+        sma_50 = close.rolling(window=50).mean()
+        
+        # ATR for volatility
+        high = nifty_data['High']
+        low = nifty_data['Low']
+        tr = pd.concat([
+            high - low,
+            abs(high - close.shift(1)),
+            abs(low - close.shift(1))
+        ], axis=1).max(axis=1)
+        atr = tr.rolling(window=14).mean()
+        atr_pct = (atr / close * 100).iloc[-1]
+        
+        # Current price vs SMAs
+        current_price = close.iloc[-1]
+        above_sma20 = current_price > sma_20.iloc[-1]
+        above_sma50 = current_price > sma_50.iloc[-1]
+        sma20_above_sma50 = sma_20.iloc[-1] > sma_50.iloc[-1]
+        
+        # ADX for trend strength
+        from ta.trend import ADXIndicator
+        adx = ADXIndicator(high, low, close, window=14)
+        adx_value = adx.adx().iloc[-1]
+        
+        # Regime detection
+        if atr_pct > 3.0:
+            regime = 'HIGH_VOLATILITY'
+        elif adx_value > 25 and above_sma20 and above_sma50 and sma20_above_sma50:
+            regime = 'TRENDING_UP'
+        elif adx_value > 25 and not above_sma20 and not above_sma50 and not sma20_above_sma50:
+            regime = 'TRENDING_DOWN'
+        else:
+            regime = 'RANGE_BOUND'
+        
+        logger.info(f"📊 Market Regime: {regime} (ADX: {adx_value:.1f}, ATR%: {atr_pct:.2f})")
+        return regime
+        
+    except Exception as e:
+        logger.error(f"Error detecting market regime: {e}")
+        return 'RANGE_BOUND'
+
+
+def get_regime_adjusted_thresholds(regime: str) -> dict:
+    """
+    Return filtering thresholds adjusted for current market regime
+    """
+    
+    thresholds = {
+        'TRENDING_UP': {
+            'min_confidence': 70,
+            'min_bt_wr': 55,
+            'min_score': 60,
+            'prefer_side': 'LONG',
+            'description': 'Trending Up - Favor LONG positions with momentum'
+        },
+        'TRENDING_DOWN': {
+            'min_confidence': 70,
+            'min_bt_wr': 55,
+            'min_score': 60,
+            'prefer_side': 'SHORT',
+            'description': 'Trending Down - Favor SHORT positions'
+        },
+        'RANGE_BOUND': {
+            'min_confidence': 75,
+            'min_bt_wr': 60,
+            'min_score': 65,
+            'prefer_side': None,
+            'description': 'Range-Bound - Require higher quality, balanced L/S'
+        },
+        'HIGH_VOLATILITY': {
+            'min_confidence': 80,
+            'min_bt_wr': 65,
+            'min_score': 70,
+            'prefer_side': None,
+            'description': 'High Volatility - Very selective, highest quality only'
+        }
+    }
+    
+    return thresholds.get(regime, thresholds['RANGE_BOUND'])
+
 
 def select_top_2_stocks(results: list) -> list:
     """
@@ -5464,6 +5782,46 @@ def select_top_2_stocks(results: list) -> list:
     6. Risk:Reward Ratio
     7. LONG/SHORT Diversification
     """
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🆕 STEP 0: DETECT MARKET REGIME
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    print("\n[STEP 0] Detecting Market Regime...")
+    
+    # Fetch Nifty 50 data
+    try:
+        nifty = yf.download('^NSEI', period='3mo', progress=False, auto_adjust=True)
+        regime = detect_market_regime(nifty)
+        thresholds = get_regime_adjusted_thresholds(regime)
+        
+        print(f"   🌍 Regime: {regime}")
+        print(f"   📋 {thresholds['description']}")
+        print(f"   🎯 Thresholds: Confidence ≥{thresholds['min_confidence']}%, "
+              f"WR ≥{thresholds['min_bt_wr']}%, Score ≥{thresholds['min_score']}")
+        
+    except Exception as e:
+        logger.warning(f"Could not fetch market regime: {e} - using defaults")
+        regime = 'RANGE_BOUND'
+        thresholds = get_regime_adjusted_thresholds(regime)
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 1: APPLY REGIME-BASED FILTERS
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    print(f"\n[STEP 1] Filtering by Quality (Regime-Adjusted)...")
+    
+    filtered_results = []
+    for stock in results:
+        bt = stock.get('backtest', {})
+        bt_wr = bt.get('win_rate', 0) if bt else 0
+        conf = stock.get('confidence', 0)
+        
+        # Apply regime-specific thresholds
+        if (bt_wr >= thresholds['min_bt_wr'] and 
+            conf >= thresholds['min_confidence']):
+            filtered_results.append(stock)
+    
+    print(f"   ✅ {len(filtered_results)} signals pass regime-adjusted filters")
     
     print("\n" + "="*120)
     print("🎯 ENHANCED TOP 2 SELECTION v2.0")
@@ -5601,57 +5959,94 @@ def select_top_2_stocks(results: list) -> list:
         result['composite_score'] = calculate_composite_score(result)
     
     # ═══════════════════════════════════════════════════════════════════════
-    # STEP 3: SORT BY COMPOSITE SCORE
+    # STEP 3: SORT BY COMPOSITE SCORE (WITH DETERMINISTIC TIE-BREAKER)
     # ═══════════════════════════════════════════════════════════════════════
-    
+
     print("\n[STEP 3] Ranking by Composite Score...")
-    
-    sorted_results = sorted(results, key=lambda x: x.get('composite_score', 0), reverse=True)
-    
-    # Show top 5 for context
-    print(f"\n   TOP 5 BY COMPOSITE SCORE:")
-    print(f"   {'#':<3} {'Ticker':<10} {'Side':<6} {'Score':<8} {'Tier':<20} {'Setup':<15}")
-    print(f"   {'-'*70}")
-    
-    for i, stock in enumerate(sorted_results[:5], 1):
-        print(f"   {i:<3} {stock['ticker']:<10} {stock['side']:<6} "
-              f"{stock.get('composite_score', 0):<8.1f} "
-              f"{stock.get('tier', 'N/A'):<20} "
-              f"{stock.get('setup_type', 'N/A'):<15}")
-    
+
+    # 🆕 DETERMINISTIC TIE-BREAKER
+    def sort_key(stock):
+        """
+        Multi-level sort key for deterministic ranking
+        
+        Priority:
+        1. Composite Score (descending)
+        2. Backtest Win Rate (descending)
+        3. Tier (TIER_1 > TIER_2)
+        4. Ticker (alphabetical - ultimate tie-breaker)
+        """
+        tier_rank = {
+            'TIER_1_PREMIUM': 1,
+            'TIER_2_STANDARD': 2,
+            'TIER_3_SPECULATIVE': 3
+        }
+        
+        bt = stock.get('backtest', {})
+        bt_wr = bt.get('win_rate', 0) if bt else 0
+        
+        return (
+            -stock.get('composite_score', 0),  # Higher is better (negative for descending)
+            -bt_wr,                            # Higher WR wins
+            tier_rank.get(stock.get('tier', 'TIER_3_SPECULATIVE'), 99),  # Lower tier number wins
+            stock.get('ticker', 'ZZZZ')        # Alphabetical (A comes before Z)
+        )
+
+    sorted_results = sorted(results, key=sort_key)
+
+    logger.info("✅ Applied deterministic tie-breaker: Score → WR → Tier → Ticker")
+
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 4: APPLY DIVERSIFICATION (1 LONG + 1 SHORT IF POSSIBLE)
     # ═══════════════════════════════════════════════════════════════════════
-    
+
     print("\n[STEP 4] Applying LONG/SHORT Diversification...")
-    
+
     longs = [s for s in sorted_results if s.get('side') == 'LONG']
     shorts = [s for s in sorted_results if s.get('side') == 'SHORT']
-    
+
     print(f"   Available: {len(longs)} LONG, {len(shorts)} SHORT")
-    
+
+    # 🆕 HARD DIRECTIONAL EXPOSURE RULE
+    MAX_SAME_SIDE = 1  # Maximum signals in same direction
+
     if longs and shorts:
         best_long = longs[0]
         best_short = shorts[0]
         top_2_same = sorted_results[:2]
         
+        # Check if top 2 are same direction
+        same_direction = (top_2_same[0].get('side') == top_2_same[1].get('side'))
+        
         # Compare: diversified vs same-side
         diversified_score = best_long.get('composite_score', 0) + best_short.get('composite_score', 0)
         same_side_score = sum(s.get('composite_score', 0) for s in top_2_same)
         
-        # Prefer diversification if within 15% quality
+        # 🚨 ENFORCEMENT: If top 2 are same side AND quality difference is small, FORCE diversification
         score_diff_pct = abs(same_side_score - diversified_score) / max(same_side_score, 1) * 100
         
-        if score_diff_pct <= 15:
+        if same_direction and score_diff_pct <= 20:  # Within 20% quality
+            selected = [best_long, best_short]
+            selection_method = f"DIVERSIFIED (FORCED) - Same-side diff only {score_diff_pct:.1f}%"
+            logger.info(f"✅ DIRECTIONAL CONTROL: Forced 1L+1S to limit directional risk")
+        elif score_diff_pct <= 15:  # Original logic
             selected = [best_long, best_short]
             selection_method = "DIVERSIFIED (1 LONG + 1 SHORT)"
         else:
             selected = top_2_same
-            selection_method = f"TOP 2 BY SCORE (diff: {score_diff_pct:.1f}%)"
+            selection_method = f"TOP 2 BY SCORE (large quality gap: {score_diff_pct:.1f}%)"
+            
+            # Log warning if both same direction
+            if same_direction:
+                logger.warning(f"⚠️  Both selected trades are {top_2_same[0].get('side')} - concentrated directional risk!")
     else:
         selected = sorted_results[:2]
         selection_method = "TOP 2 (only one side available)"
-    
+        
+        # Warn about unbalanced exposure
+        same_direction = (selected[0].get('side') == selected[1].get('side'))
+        if same_direction:
+            logger.warning(f"⚠️  UNBALANCED: Both trades are {selected[0].get('side')} - no opposing hedge!")
+
     print(f"   ✅ Selection Method: {selection_method}")
     
     # ═══════════════════════════════════════════════════════════════════════
@@ -5690,6 +6085,70 @@ def select_top_2_stocks(results: list) -> list:
             print(f"      Win Rate: {bt.get('win_rate', 0):.1f}%")
             print(f"      Profit Factor: {bt.get('profit_factor', 0):.2f}x")
             print(f"      Reliability: {bt.get('reliability_score', 0):.1f}/100")
+    
+    print(f"\n{'='*120}\n")
+    # ════════════════════════════════════════════════════════════════════
+    # 🆕 OPTIONAL: MINIMUM QUALITY GAP CHECK
+    # ════════════════════════════════════════════════════════════════════
+    
+    MIN_ACCEPTABLE_GAP = 5   # Alert if gap is larger than this
+    MAX_ACCEPTABLE_GAP = 25  # Critical warning if gap exceeds this
+    
+    if len(selected) == 2:
+        score_1 = selected[0].get('composite_score', 0)
+        score_2 = selected[1].get('composite_score', 0)
+        score_gap = score_1 - score_2
+        
+        print(f"\n{'='*120}")
+        print(f"📊 QUALITY GAP ANALYSIS")
+        print(f"{'='*120}")
+        print(f"   #{1} ({selected[0]['ticker']}): {score_1:.1f}/100")
+        print(f"   #{2} ({selected[1]['ticker']}): {score_2:.1f}/100")
+        print(f"   Gap: {score_gap:.1f} points ({(score_gap/score_1*100):.1f}%)")
+        
+        if score_gap > MAX_ACCEPTABLE_GAP:
+            print(f"   ⚠️  CRITICAL GAP: #{2} is significantly weaker than #{1}")
+            print(f"   ⚠️  Consider trading ONLY #{1} today for better risk management")
+            logger.warning(f"QUALITY GAP WARNING: {selected[0]['ticker']} scores {score_gap:.1f} points higher than {selected[1]['ticker']}")
+        elif score_gap > MIN_ACCEPTABLE_GAP:
+            print(f"   ℹ️  Notable gap: #{1} has clear quality advantage")
+        else:
+            print(f"   ✅ Quality gap is acceptable - both signals are comparable")
+        
+        print(f"{'='*120}\n")
+
+    
+
+    selected_tickers = {s['ticker'] for s in selected}
+    rejected = [s for s in sorted_results if s['ticker'] not in selected_tickers]
+    
+    if rejected:
+        print(f"\n🚫 REJECTED CANDIDATES ({len(rejected)} stocks):\n")
+        print(f"   {'Rank':<6} {'Ticker':<10} {'Side':<6} {'Score':<8} {'Tier':<20} {'Rejection Reason':<50}")
+        print(f"   {'-'*110}")
+        
+        for i, stock in enumerate(rejected[:10], 3):  # Show top 10 rejected
+            score = stock.get('composite_score', 0)
+            tier = stock.get('tier', 'N/A')
+            bt = stock.get('backtest', {})
+            bt_wr = bt.get('win_rate', 0) if bt else 0
+            bt_pf = bt.get('profit_factor', 0) if bt else 0
+            
+            # Determine rejection reason
+            if i == 3:
+                reason = "Ranked #3 - Only Top 2 selected"
+            elif tier == 'TIER_3_SPECULATIVE':
+                reason = "TIER_3 - Below quality threshold"
+            elif bt_wr < 55:
+                reason = f"Low Backtest WR: {bt_wr:.1f}% (need ≥55%)"
+            elif bt_pf < 1.2:
+                reason = f"Low Profit Factor: {bt_pf:.2f}x (need ≥1.2x)"
+            elif stock.get('confidence', 0) < 70:
+                reason = f"Low Confidence: {stock.get('confidence', 0):.1f}% (prefer ≥70%)"
+            else:
+                reason = f"Lower Score than Top 2 (diff: {selected[1].get('composite_score', 0) - score:.1f} pts)"
+            
+            print(f"   #{i:<5} {stock['ticker']:<10} {stock['side']:<6} {score:<8.1f} {tier:<20} {reason:<50}")
     
     print(f"\n{'='*120}\n")
     
@@ -6206,7 +6665,7 @@ def github_actions_main():
                     
                     if signals_data:
                         # Update Google Sheet
-                        success = update_google_sheet(signals_data)
+                        success = update_google_sheet_with_gatekeeper(signals_data)
                         
                         if success:
                             logger.info("✅ Google Sheet updated successfully!")
